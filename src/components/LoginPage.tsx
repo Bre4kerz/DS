@@ -131,7 +131,7 @@ export default function LoginPage() {
 
         <button
           onClick={handleMicrosoft}
-          disabled={loading}
+          disabled={true}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/20 hover:bg-white/30 border border-white/20 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Monitor className="w-4 h-4 text-blue-600" />
