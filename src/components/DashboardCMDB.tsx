@@ -203,16 +203,16 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, onEdit, onD
                   className={`overflow-x-auto cursor-pointer ${creds ? 'hover:bg-slate-800/20' : ''}`}
                   onClick={() => creds && toggleRow(row.id)}
                 >
-                  <table className="w-full table-fixed text-sm">
+                  <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
                       <tr>
-                        <th className="w-32 px-4 py-3 text-left font-medium">Type</th>
+                        <th className="w-24 px-4 py-3 text-left font-medium">Type</th>
                         <th className="w-40 px-4 py-3 text-left font-medium">Name</th>
                         <th className="w-52 px-4 py-3 text-left font-medium">Domain / Version</th>
-                        <th className="w-75 px-4 py-3 text-left font-medium">Use / Roles</th>
+                        <th className="w-40 px-4 py-3 text-left font-medium">Use / Roles</th>
                         <th className="w-52 px-4 py-3 text-left font-medium">IP / Identifier</th>
-                        <th className="W-20 px-4 py-3 text-left font-medium">Estado</th>
-                        <th className="W-20 px-4 py-3 text-left font-medium">Acciones</th>
+                        <th className="w-28 px-4 py-3 text-left font-medium">Estado</th>
+                        <th className="w-32 px-4 py-3 text-left font-medium">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -537,11 +537,11 @@ export default function DashboardCMDB() {
     <div className="min-h-screen bg-[#050d18] text-white font-sans">
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm sticky top-0 z-30 relative">
-        <div className="mx-auto max-w-[1800px] px-4 md:px-6 py-4 flex items-center justify-between">
+        <div className="mx-auto max-w-[1800px] px-4 md:px-6 py-4 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center">
-            <img src={logoImg} alt="JoSYS" className="h-10 w-auto object-contain brightness-125" />
+            <img src={logoImg} alt="JoSYS" className="h-8 md:h-10 w-auto object-contain brightness-125" />
           </div>
-          <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
+          <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 flex-col items-center">
             <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Dashboard de Servicios</span>
           </div>
           <div className="flex items-center gap-2">

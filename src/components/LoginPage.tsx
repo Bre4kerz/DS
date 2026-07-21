@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, LogIn, Monitor } from 'lucide-react'
 import logoImg from '../assets/logo1.png'
+import FloatingLines from './FloatingLines'
 
 export default function LoginPage() {
   const { signIn, signInWithMicrosoft } = useAuth()
@@ -14,9 +15,7 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-
     const { error } = await signIn(email, password)
-
     if (error) setError(error.message)
     setLoading(false)
   }
@@ -32,8 +31,44 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950">
-      <div className="w-full max-w-md p-8 rounded-2xl bg-white border border-slate-200 shadow-2xl">
+    <>
+      <style>{`
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(24px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[#050d18]">
+
+      {/* FloatingLines background */}
+      <div className="absolute inset-0 z-0">
+        <FloatingLines
+          linesGradient={['#0100f0', '#6f6fff', '#b6b6b6']}
+          enabledWaves={['top', 'middle', 'bottom']}
+          lineCount={8}
+          lineDistance={8}
+          bendRadius={8}
+          bendStrength={-2}
+          interactive={true}
+          parallax={true}
+          animationSpeed={1}
+          mixBlendMode="screen"
+        />
+      </div>
+
+      {/* Login card */}
+      <div
+        className="relative z-10 w-full max-w-md mx-4 p-8 rounded-2xl bg-white/20 backdrop-blur-md border border-white/20 shadow-2xl"
+        style={{
+          animation: 'fadeInUp 0.7s ease-out both',
+        }}
+      >
         <div className="flex items-center justify-center mb-8">
           <img src={logoImg} alt="JoSYS" className="h-12 object-contain" />
         </div>
@@ -46,7 +81,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Correo electrónico</label>
+            <label className="block text-sm font-medium text-white mb-1.5">Correo electrónico</label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
@@ -54,14 +89,14 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-900/30 focus:border-blue-900/50 transition-all"
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white/80 border border-white/30 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
                 placeholder="usuario@empresa.com"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Contraseña</label>
+            <label className="block text-sm font-medium text-white mb-1.5">Contraseña</label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
@@ -69,7 +104,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-slate-50 border border-slate-300 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-900/30 focus:border-blue-900/50 transition-all"
+                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white/80 border border-white/30 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
                 placeholder="••••••••"
               />
             </div>
@@ -87,22 +122,23 @@ export default function LoginPage() {
 
         <div className="relative my-6">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200" />
+            <div className="w-full border-t border-white/20" />
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-3 bg-white text-slate-400">o</span>
+            <span className="px-3 bg-transparent text-white/60">o</span>
           </div>
         </div>
 
         <button
           onClick={handleMicrosoft}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/20 hover:bg-white/30 border border-white/20 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Monitor className="w-4 h-4 text-blue-600" />
           Continuar con Microsoft
         </button>
       </div>
     </div>
+    </>
   )
 }
