@@ -115,16 +115,24 @@ function CredentialsPanel({ credentials }: { credentials: Credentials }) {
   )
 }
 
-function SectionCard({ section, defaultOpen = false, isAdmin = true, onEdit, onDelete, onDuplicate, onHistory }: {
+function SectionCard({ section, defaultOpen = false, isAdmin = true, highlightedItemId, onEdit, onDelete, onDuplicate, onHistory }: {
   section: SectionData
   defaultOpen?: boolean
   isAdmin?: boolean
+  highlightedItemId?: string | null
   onEdit: (item: CmdbItem) => void
   onDelete: (id: string) => void
   onDuplicate: (item: CmdbItem) => void
   onHistory: (item: CmdbItem) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
+
+  // Auto-open if a highlighted item is in this section
+  useEffect(() => {
+    if (highlightedItemId && section.rows.some(r => r.id === highlightedItemId)) {
+      setOpen(true)
+    }
+  }, [highlightedItemId, section.rows])
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
@@ -196,8 +204,13 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, onEdit, onD
             const creds = hasCredentials(row.item)
             return (
               <div
+                id={'item-' + row.id}
                 key={row.id}
-                className={`rounded-2xl border ${creds ? 'border-cyan-500/20' : 'border-slate-800'} bg-[#08111f] overflow-hidden`}
+                className={`rounded-2xl border overflow-hidden transition-all duration-500 ${
+                  highlightedItemId === row.id
+                    ? 'border-cyan-400 shadow-lg shadow-cyan-500/20 bg-cyan-500/5'
+                    : creds ? 'border-cyan-500/20 bg-[#08111f]' : 'border-slate-800 bg-[#08111f]'
+                }`}
               >
                 <div
                   className={`overflow-x-auto cursor-pointer ${creds ? 'hover:bg-slate-800/20' : ''}`}
@@ -297,6 +310,9 @@ export default function DashboardCMDB() {
   const [allItems, setAllItems] = useState<CmdbItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null)
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set())
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [selectedStatus, setSelectedStatus] = useState('Todos')
   const [statsModal, setStatsModal] = useState<null | 'clients' | 'total' | 'expiring' | 'critical'>(null)
@@ -369,6 +385,23 @@ export default function DashboardCMDB() {
     }
   }, [clients, selectedClientId])
 
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q || q.length < 2) return []
+    return allItems
+      .filter(i =>
+        i.name?.toLowerCase().includes(q) ||
+        i.ip?.toLowerCase().includes(q) ||
+        i.serial?.toLowerCase().includes(q) ||
+        i.domain_version?.toLowerCase().includes(q)
+      )
+      .slice(0, 10)
+      .map(i => ({
+        item: i,
+        client: clients.find(c => c.id === i.client_id),
+      }))
+  }, [search, allItems, clients])
+
   const allCategories = useMemo(() => {
     const cats = new Set(allItems.map(i => i.category).filter(Boolean))
     return ['Todos', ...Array.from(cats).sort()]
@@ -399,6 +432,23 @@ export default function DashboardCMDB() {
     setClientNotes(client?.notes ?? '')
     setShowNotes(false)
   }, [selectedClientId, clients])
+
+  const navigateToItem = (item: CmdbItem) => {
+    setSearch('')
+    setShowSearchDropdown(false)
+    setSelectedClientId(item.client_id ?? null)
+    // Open the section and highlight the item after navigation
+    setOpenSections(prev => new Set([...prev, item.category]))
+    setHighlightedItemId(item.id)
+    setTimeout(() => {
+      setHighlightedItemId(null)
+    }, 3000)
+    // Scroll to item after short delay
+    setTimeout(() => {
+      const el = document.getElementById('item-' + item.id)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 300)
+  }
 
   const saveClientNotes = async () => {
     if (!selectedClientId) return
@@ -587,21 +637,46 @@ export default function DashboardCMDB() {
           {/* Sidebar */}
           <aside className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/50 p-4 shadow-xl h-fit">
             {/* Search */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3 relative">
               <div className="flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3">
                 <Search size={16} className="text-slate-400 flex-shrink-0" />
                 <input
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  onChange={e => { setSearch(e.target.value); setShowSearchDropdown(true) }}
+                  onFocus={() => setShowSearchDropdown(true)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && searchResults.length > 0) {
+                      navigateToItem(searchResults[0].item)
+                    }
+                    if (e.key === 'Escape') { setSearch(''); setShowSearchDropdown(false) }
+                  }}
                   placeholder="Buscar cliente, IP, sistema..."
                   className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
                 />
                 {search && (
-                  <button onClick={() => setSearch('')} className="text-slate-500 hover:text-white">
+                  <button onClick={() => { setSearch(''); setShowSearchDropdown(false) }} className="text-slate-500 hover:text-white">
                     <X size={14} />
                   </button>
                 )}
               </div>
+              {/* Search Dropdown */}
+              {showSearchDropdown && searchResults.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+                  {searchResults.map(({ item, client }) => (
+                    <button
+                      key={item.id}
+                      onClick={() => navigateToItem(item)}
+                      className="flex w-full items-center gap-3 px-4 py-3 hover:bg-slate-800 transition-colors text-left border-b border-slate-800 last:border-0"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-white truncate">{item.name}</p>
+                        <p className="text-xs text-slate-400 truncate">{client?.name} · {item.category}</p>
+                      </div>
+                      {item.ip && <span className="text-xs text-cyan-400 font-mono flex-shrink-0">{item.ip}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Stats */}
@@ -876,7 +951,8 @@ export default function DashboardCMDB() {
                       <SectionCard
                         key={selectedClientId + '-' + section.title}
                         section={section}
-                        defaultOpen={false}
+                        defaultOpen={openSections.has(section.title)}
+                        highlightedItemId={highlightedItemId}
                         isAdmin={userRole === 'admin'}
                         onEdit={item => { setEditItem(item); setModalOpen(true) }}
                         onDelete={id => setDeleteConfirm(id)}
