@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback, memo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, LogIn, Monitor } from 'lucide-react'
 import logoImg from '../assets/logo1.png'
 import FloatingLines from './FloatingLines'
 import BorderGlow from './BorderGlow'
-import SpecularButton from './SpecularButton'  // ← IMPORTAR
+import SpecularButton from './SpecularButton'
+
+// Memoizar componentes pesados para evitar re-renders cuando cambia el estado del formulario
+const MemoizedFloatingLines = memo(FloatingLines)
+const MemoizedBorderGlow = memo(BorderGlow)
 
 export default function LoginPage() {
   const { signIn, signInWithMicrosoft } = useAuth()
@@ -13,7 +17,34 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Memoizar props de FloatingLines para que no cambien de referencia en cada render
+  const floatingLinesProps = useMemo(() => ({
+    linesGradient: ['#0100f0', '#6f6fff', '#b6b6b6'],
+    enabledWaves: ['top', 'middle', 'bottom'] as Array<'top' | 'middle' | 'bottom'>,
+    lineCount: 8,
+    lineDistance: 8,
+    bendRadius: 8,
+    bendStrength: -2,
+    interactive: true,
+    parallax: true,
+    animationSpeed: 1,
+    mixBlendMode: 'screen' as const,
+  }), [])
+
+  // Memoizar props de BorderGlow
+  const borderGlowProps = useMemo(() => ({
+    edgeSensitivity: 30,
+    glowColor: '220 80 80',
+    backgroundColor: 'rgba(5,13,24,0.75)',
+    borderRadius: 20,
+    glowRadius: 40,
+    glowIntensity: 1.2,
+    coneSpread: 25,
+    animated: false,
+    colors: ['#0100f0', '#6f6fff', '#38bdf8'],
+  }), [])
+
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
@@ -23,9 +54,9 @@ export default function LoginPage() {
     if (error) setError(error.message)
 
     setLoading(false)
-  }
+  }, [email, password, signIn])
 
-  const handleMicrosoft = async () => {
+  const handleMicrosoft = useCallback(async () => {
     setError('')
     setLoading(true)
 
@@ -35,7 +66,7 @@ export default function LoginPage() {
       setError(error.message)
       setLoading(false)
     }
-  }
+  }, [signInWithMicrosoft])
 
   return (
     <>
@@ -54,33 +85,14 @@ export default function LoginPage() {
 
       <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[#050d18]">
 
-        {/* Fondo */}
+        {/* Fondo - Memoizado para evitar recreación del canvas WebGL en cada render */}
         <div className="absolute inset-0 z-0">
-          <FloatingLines
-            linesGradient={['#0100f0', '#6f6fff', '#b6b6b6']}
-            enabledWaves={['top', 'middle', 'bottom']}
-            lineCount={8}
-            lineDistance={8}
-            bendRadius={8}
-            bendStrength={-2}
-            interactive={true}
-            parallax={true}
-            animationSpeed={1}
-            mixBlendMode="screen"
-          />
+          <MemoizedFloatingLines {...floatingLinesProps} />
         </div>
 
-        {/* Login */}
-        <BorderGlow
-          edgeSensitivity={30}
-          glowColor="220 80 80"
-          backgroundColor="rgba(5,13,24,0.75)"
-          borderRadius={20}
-          glowRadius={40}
-          glowIntensity={1.2}
-          coneSpread={25}
-          animated={false}
-          colors={['#0100f0', '#6f6fff', '#38bdf8']}
+        {/* Login - Memoizado para evitar parpadeo del glow */}
+        <MemoizedBorderGlow
+          {...borderGlowProps}
           className="relative z-10 w-full max-w-md mx-4 backdrop-blur-md"
         >
           <div
@@ -107,7 +119,7 @@ export default function LoginPage() {
             >
               <div>
                 <label className="block text-sm font-medium text-white mb-1.5">
-                  Correo electrónico
+                  Email address
                 </label>
 
                 <div className="relative">
@@ -118,7 +130,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    placeholder="usuario@empresa.com"
+                    placeholder="user@company.com"
                     className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white/80 border border-white/30 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
                   />
                 </div>
@@ -126,7 +138,7 @@ export default function LoginPage() {
 
               <div>
                 <label className="block text-sm font-medium text-white mb-1.5">
-                  Contraseña
+                  Password
                 </label>
 
                 <div className="relative">
@@ -165,11 +177,10 @@ export default function LoginPage() {
                   autoAnimate={false}
                   disabled={loading}
                   className="w-full"
-                  onClick={handleSubmit}
                 >
                   <span className="flex items-center justify-center gap-2">
                     <LogIn className="w-4 h-4" />
-                    {loading ? 'Procesando...' : 'Iniciar sesión'}
+                    {loading ? 'Processing...' : 'Sign in'}
                   </span>
                 </SpecularButton>
               </div>
@@ -193,10 +204,10 @@ export default function LoginPage() {
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/20 hover:bg-white/30 border border-white/20 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Monitor className="w-4 h-4 text-blue-600" />
-              Continuar con Microsoft
+              Continue with Microsoft
             </button>
           </div>
-        </BorderGlow>
+        </MemoizedBorderGlow>
       </div>
     </>
   )
