@@ -126,13 +126,6 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
   onHistory: (item: CmdbItem) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
-
-  // Auto-open if a highlighted item is in this section
-  useEffect(() => {
-    if (highlightedItemId && section.rows.some(r => r.id === highlightedItemId)) {
-      setOpen(true)
-    }
-  }, [highlightedItemId, section.rows])
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
@@ -158,135 +151,211 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
     })
   }
 
+  useEffect(() => {
+    if (highlightedItemId && section.rows.some(r => r.id === highlightedItemId)) {
+      setOpen(true)
+    }
+  }, [highlightedItemId, section.rows])
+
   return (
-    <div className={`overflow-hidden rounded-2xl border shadow-xl transition-colors ${
-      hasExpiring ? 'border-amber-500/30' : 'border-slate-800'
-    } bg-slate-900/80`}>
+    <div className={`overflow-hidden rounded-2xl border transition-all duration-300 ${
+      hasExpiring ? 'border-amber-500/20 shadow-lg shadow-amber-500/5' : 'border-slate-800/60'
+    } bg-[#0a1220]`}>
+
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex w-full items-center justify-between gap-3 border-b border-slate-800 px-4 py-4 text-left hover:bg-slate-800/50 transition-colors"
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-slate-800/30 transition-colors"
       >
-        <div className="flex items-center gap-3">
-          <div className={`rounded-xl p-2 ${
-            hasExpiring ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-800 text-slate-200'
+        <div className="flex items-center gap-3.5">
+          <div className={`rounded-xl p-2.5 ${
+            hasExpiring ? 'bg-amber-500/10 text-amber-300' : 'bg-slate-800 text-slate-300'
           }`}>
             {icon}
           </div>
           <div className="text-left">
-            <h3 className="text-base font-semibold text-white">{section.title}</h3>
-            <p className="text-xs text-slate-400">
-              {section.rows.length} registros{hasCreds ? ` · ${section.rows.filter(r => hasCredentials(r.item)).length} con credenciales` : ''}
+            <h3 className="text-[15px] font-semibold text-white tracking-tight">{section.title}</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {section.rows.length} registros
+              {hasCreds && ` · ${section.rows.filter(r => hasCredentials(r.item)).length} con credenciales`}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {open && (
+
+        <div className="flex items-center gap-3">
+          {hasExpiring && (
+            <span className="hidden sm:flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-[11px] font-medium text-amber-300">
+              <AlertTriangle size={11} />
+              Revisar expiraciones
+            </span>
+          )}
+          {open ? <ChevronDown size={18} className="text-slate-500" /> : <ChevronRight size={18} className="text-slate-500" />}
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-slate-800/60">
+
+          <div className="flex items-center justify-between px-5 py-2.5 bg-slate-950/30">
+            <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">
+              Detalle de registros
+            </p>
             <select
               value={sortBy}
-              onChange={e => { e.stopPropagation(); setSortBy(e.target.value as typeof sortBy) }}
-              onClick={e => e.stopPropagation()}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 outline-none cursor-pointer"
+              onChange={e => setSortBy(e.target.value as typeof sortBy)}
+              className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-2.5 py-1 text-[11px] text-slate-400 outline-none cursor-pointer hover:border-slate-600 transition-colors"
             >
               <option value="name-asc">Nombre A-Z</option>
               <option value="name-desc">Nombre Z-A</option>
               <option value="type-asc">Tipo A-Z</option>
               <option value="type-desc">Tipo Z-A</option>
             </select>
-          )}
-          {open ? <ChevronDown size={18} className="text-slate-400" /> : <ChevronRight size={18} className="text-slate-400" />}
-        </div>
-      </button>
+          </div>
 
-      {open && (
-        <div className="space-y-4 p-4">
-          {sortedRows.map(row => {
-            const isExpanded = expandedRows.has(row.id)
-            const creds = hasCredentials(row.item)
-            return (
-              <div
-                id={'item-' + row.id}
-                key={row.id}
-                className={`rounded-2xl border overflow-hidden transition-all duration-500 ${
-                  highlightedItemId === row.id
-                    ? 'border-cyan-400 shadow-lg shadow-cyan-500/20 bg-cyan-500/5'
-                    : creds ? 'border-cyan-500/20 bg-[#08111f]' : 'border-slate-800 bg-[#08111f]'
-                }`}
-              >
-                <div
-                  className={`overflow-x-auto cursor-pointer ${creds ? 'hover:bg-slate-800/20' : ''}`}
-                  onClick={() => creds && toggleRow(row.id)}
-                >
-                  <table className="w-full min-w-[760px] text-sm">
-                    <thead className="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wider">
-                      <tr>
-                        <th className="w-24 px-4 py-3 text-left font-medium">Type</th>
-                        <th className="w-40 px-4 py-3 text-left font-medium">Name</th>
-                        <th className="w-52 px-4 py-3 text-left font-medium">Domain / Version</th>
-                        <th className="w-40 px-4 py-3 text-left font-medium">Use / Roles</th>
-                        <th className="w-52 px-4 py-3 text-left font-medium">IP / Identifier</th>
-                        <th className="w-28 px-4 py-3 text-left font-medium">Estado</th>
-                        <th className="w-32 px-4 py-3 text-left font-medium">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-t border-slate-800 hover:bg-slate-800/40 transition-colors">
-                        <td className="px-4 py-4 text-slate-200 truncate">{row.type || '—'}</td>
-                        <td className="px-4 py-4 text-slate-100 font-medium truncate">{row.name || '—'}</td>
-                        <td className="px-4 py-4 text-slate-300 truncate">{row.domain || '—'}</td>
-                        <td className="px-4 py-4 text-slate-300 text-xs truncate">{row.role || '—'}</td>
-                        <td className="px-4 py-4 font-mono text-cyan-300 text-xs truncate">{row.ip || '—'}</td>
-                        <td className="px-4 py-4"><StatusPill status={row.status} /></td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-1">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-slate-800/60 text-[10px] uppercase tracking-wider text-slate-500">
+                  <th className="px-5 py-2.5 text-left font-medium w-10"></th>
+                  <th className="px-3 py-2.5 text-left font-medium">Tipo</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Nombre</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Dominio / Versión</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Uso / Roles</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">IP / ID</th>
+                  <th className="px-3 py-2.5 text-left font-medium w-28">Estado</th>
+                  <th className="px-5 py-2.5 text-right font-medium w-32">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.map((row, idx) => {
+                  const isExpanded = expandedRows.has(row.id)
+                  const creds = hasCredentials(row.item)
+                  const isHighlighted = highlightedItemId === row.id
+
+                  return (
+                    <>
+                      <tr
+                        id={'item-' + row.id}
+                        key={row.id}
+                        className={`border-b border-slate-800/40 transition-all duration-300 ${
+                          isHighlighted
+                            ? 'bg-cyan-500/5'
+                            : idx % 2 === 0 ? 'bg-transparent' : 'bg-slate-900/20'
+                        } hover:bg-slate-800/30`}
+                      >
+                        <td className="px-5 py-3">
+                          {creds ? (
                             <button
-                              onClick={e => { e.stopPropagation(); onHistory(row.item) }}
-                              className="p-1.5 rounded-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white transition-all"
+                              onClick={() => toggleRow(row.id)}
+                              className="p-1 rounded-md hover:bg-slate-700/50 transition-colors"
+                            >
+                              {isExpanded 
+                                ? <ChevronDown size={14} className="text-cyan-400" />
+                                : <ChevronRight size={14} className="text-cyan-400" />
+                              }
+                            </button>
+                          ) : (
+                            <span className="inline-block w-[22px]"></span>
+                          )}
+                        </td>
+
+                        <td className="px-3 py-3">
+                          <span className="text-slate-400 text-[12px]">{row.type || '—'}</span>
+                        </td>
+
+                        <td className="px-3 py-3">
+                          <div>
+                            <p className="text-white font-medium text-[13px]">{row.name || '—'}</p>
+                            {row.item.notes && (
+                              <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[200px]">{row.item.notes}</p>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-3 hidden md:table-cell">
+                          <span className="text-slate-400 text-[12px]">{row.domain || '—'}</span>
+                        </td>
+
+                        <td className="px-3 py-3 hidden lg:table-cell">
+                          <span className="text-slate-500 text-[11px]">{row.role || '—'}</span>
+                        </td>
+
+                        <td className="px-3 py-3 hidden sm:table-cell">
+                          <span className="font-mono text-cyan-400/80 text-[11px]">{row.ip || '—'}</span>
+                        </td>
+
+                        <td className="px-3 py-3">
+                          <StatusPill status={row.status} />
+                        </td>
+
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => onHistory(row.item)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-all"
                               title="Historial"
                             >
-                              <History size={12} />
+                              <History size={13} />
                             </button>
                             {isAdmin && (
                               <>
                                 <button
-                                  onClick={e => { e.stopPropagation(); onDuplicate(row.item) }}
-                                  className="p-1.5 rounded-lg bg-slate-700 text-slate-400 hover:bg-cyan-500/20 hover:text-cyan-400 transition-all"
+                                  onClick={() => onDuplicate(row.item)}
+                                  className="p-1.5 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all"
                                   title="Duplicar"
                                 >
-                                  <CopyIcon size={12} />
+                                  <CopyIcon size={13} />
                                 </button>
                                 <button
-                                  onClick={e => { e.stopPropagation(); onEdit(row.item) }}
-                                  className="p-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-500 text-white transition-all"
+                                  onClick={() => onEdit(row.item)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-blue-500/20 transition-all"
                                   title="Editar"
                                 >
-                                  <Pencil size={12} />
+                                  <Pencil size={13} />
                                 </button>
                                 <button
-                                  onClick={e => { e.stopPropagation(); onDelete(row.id) }}
-                                  className="p-1.5 rounded-lg bg-red-600/80 hover:bg-red-500 text-white transition-all"
+                                  onClick={() => onDelete(row.id)}
+                                  className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
                                   title="Eliminar"
                                 >
-                                  <Trash2 size={12} />
+                                  <Trash2 size={13} />
                                 </button>
                               </>
-                            )}
-                            {creds && (
-                              <div className="ml-1">
-                                {isExpanded ? <ChevronDown size={14} className="text-cyan-400" /> : <ChevronRight size={14} className="text-cyan-400" />}
-                              </div>
                             )}
                           </div>
                         </td>
                       </tr>
-                    </tbody>
-                  </table>
-                </div>
-                {isExpanded && creds && (
-                  <CredentialsPanel credentials={getCredentials(row.item)} />
-                )}
-              </div>
-            )
-          })}
+
+                      {isExpanded && creds && (
+                        <tr>
+                          <td colSpan={8} className="px-0 py-0">
+                            <div className="bg-slate-950/40 border-t border-slate-800/30 px-5 py-4">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Lock size={13} className="text-yellow-400/80" />
+                                <h4 className="text-[11px] font-semibold text-yellow-300/90 uppercase tracking-wider">Credenciales</h4>
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <CredentialField label="Usuario" value={getCredentials(row.item).user} />
+                                <CredentialField label="Contraseña" value={getCredentials(row.item).password} />
+                                <CredentialField label="Usuario alt." value={getCredentials(row.item).user_alt} />
+                                <CredentialField label="Contraseña alt." value={getCredentials(row.item).password_alt} />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {sortedRows.length === 0 && (
+            <div className="text-center py-8 text-slate-500 text-sm">
+              <Server size={24} className="mx-auto mb-2 opacity-30" />
+              No hay registros en esta sección
+            </div>
+          )}
         </div>
       )}
     </div>
