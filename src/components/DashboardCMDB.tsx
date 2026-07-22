@@ -388,6 +388,7 @@ export default function DashboardCMDB() {
   const [modalSearch, setModalSearch] = useState('')
   const [alertThreshold, setAlertThreshold] = useState<number>(365)
   const [showAlertConfig, setShowAlertConfig] = useState(false)
+  const [alertsExpanded, setAlertsExpanded] = useState(true)
   const [alertStatus, setAlertStatus] = useState('Todos')
   const [categoryFilter, setCategoryFilter] = useState<string>('Todos')
   const [clientNotes, setClientNotes] = useState<string>('')
@@ -845,123 +846,144 @@ export default function DashboardCMDB() {
           {/* Main content */}
           <main className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
             {/* Expiration alerts - always visible */}
+     
             {expiringItems.length > 0 && (
-              <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Calendar size={18} className="text-amber-400" />
-                    <h3 className="text-lg font-semibold">Alertas de expiración</h3>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {alertStatus !== 'Todos' && <StatusPill status={alertStatus} />}
-                    {alertStatus !== 'Todos' && (
-                      <button onClick={() => setAlertStatus('Todos')} className="text-xs text-slate-400 hover:text-white">
-                        Ver todos
-                      </button>
+  <div className="rounded-2xl border border-amber-500/15 bg-[#0a1220] overflow-hidden">
+    {/* ===== HEADER RETRAÍBLE ===== */}
+    <button
+      onClick={() => setAlertsExpanded(v => !v)}
+      className="flex w-full items-center justify-between px-5 py-4 border-b border-amber-500/10 bg-amber-500/[0.03] hover:bg-amber-500/[0.05] transition-colors text-left"
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+          <Calendar size={16} className="text-amber-400" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-amber-200">Alertas de expiración</h3>
+          <p className="text-xs text-amber-400/60">{expiringItems.length} items requieren atención</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        {expiringItems.length > 5 && alertsExpanded && (
+          <span className="text-xs text-amber-400/50 bg-amber-500/10 px-2.5 py-0.5 rounded-full">
+            mostrando 5 de {expiringItems.length}
+          </span>
+        )}
+        <ChevronDown
+          size={18}
+          className={`text-slate-500 transition-transform duration-300 ${alertsExpanded ? '' : '-rotate-90'}`}
+        />
+      </div>
+    </button>
+
+    {/* ===== CONTENIDO (solo expandido) ===== */}
+    {alertsExpanded && (
+      <>
+        {/* Barra de configuración compacta */}
+        <div className="border-b border-amber-500/10 bg-slate-950/30 px-5 py-3 flex items-center gap-3 flex-wrap">
+          <span className="text-xs text-slate-500 uppercase tracking-wider flex-shrink-0">Umbral:</span>
+          <div className="flex gap-1.5">
+            {[30, 60, 90, 180, 365].map(d => (
+              <button
+                key={d}
+                onClick={() => setAlertThreshold(d)}
+                className={`px-2.5 py-1 rounded-md text-xs border transition-all ${
+                  alertThreshold === d
+                    ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                    : 'bg-slate-800/60 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-4 bg-slate-700/50 mx-1" />
+          <span className="text-xs text-slate-500 uppercase tracking-wider flex-shrink-0">Status:</span>
+          <div className="flex gap-1.5">
+            {['Todos', 'Vencido', 'Próximo'].map(x => (
+              <button
+                key={x}
+                onClick={() => setAlertStatus(x)}
+                className={`px-2.5 py-1 rounded-md text-xs border transition-all ${
+                  alertStatus === x
+                    ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                    : 'bg-slate-800/60 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                {x}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ===== LISTA COMPACTA (máx 5 items) ===== */}
+        <div className="divide-y divide-slate-800/40">
+          {expiringItems.slice(0, 5).map(item => {
+            const status = getItemStatus(item.expiration_date)
+            const days = getDaysUntilExpiration(item.expiration_date)
+            const client = clients.find(c => c.id === item.client_id)
+            const isStale = isProcessStale(item)
+
+            return (
+              <div
+                key={item.id}
+                onClick={() => { setEditItem(item); setModalOpen(true) }}
+                className={`flex items-center gap-3 px-5 py-3 cursor-pointer transition-colors group ${
+                  status === 'Vencido'
+                    ? 'hover:bg-rose-500/[0.04]'
+                    : 'hover:bg-amber-500/[0.04]'
+                }`}
+              >
+                {/* Barra de severidad */}
+                <div className={`w-[3px] h-6 rounded-full flex-shrink-0 ${
+                  status === 'Vencido' ? 'bg-rose-500' : 'bg-amber-500'
+                }`} />
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate leading-tight">{item.name}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-slate-500 truncate">{client?.name}</span>
+                    <span className="text-slate-700 text-xs">·</span>
+                    <span className="text-xs text-slate-500">{item.category}</span>
+                    {isStale && (
+                      <>
+                        <span className="text-slate-700 text-xs">·</span>
+                        <span className="text-xs text-orange-400/80">Sin seguimiento +5d</span>
+                      </>
                     )}
-                    <button
-                      onClick={() => setShowAlertConfig(v => !v)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border transition-all ${showAlertConfig ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}
-                    >
-                      <Filter size={12} />
-                      Configurar
-                    </button>
                   </div>
                 </div>
-                {showAlertConfig && (
-                  <div className="mb-4 rounded-2xl border border-slate-700 bg-slate-800/60 p-4 space-y-4">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <div className="flex-1 min-w-[200px]">
-                        <label className="text-xs text-slate-400 uppercase tracking-wide block mb-2">
-                          Mostrar alertas con menos de <span className="text-cyan-300 font-bold">{alertThreshold} días</span> para vencer
-                        </label>
-                        <input
-                          type="range"
-                          min={7}
-                          max={365}
-                          step={1}
-                          value={alertThreshold}
-                          onChange={e => setAlertThreshold(Number(e.target.value))}
-                          className="w-full accent-cyan-500"
-                        />
-                        <div className="flex justify-between text-[11px] text-slate-500 mt-1">
-                          <span>7 días</span>
-                          <span>365 días</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs text-slate-400 uppercase tracking-wide">Acceso rápido</label>
-                        <div className="flex gap-2 flex-wrap">
-                          {[30, 60, 90, 180].map(d => (
-                            <button
-                              key={d}
-                              onClick={() => setAlertThreshold(d)}
-                              className={`px-3 py-1.5 rounded-xl text-xs border transition-all ${alertThreshold === d ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'}`}
-                            >
-                              {d}d
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-400 uppercase tracking-wide block mb-2">Filtrar por status</label>
-                      <div className="flex flex-wrap gap-2">
-                        {['Todos', 'Vencido', 'Próximo', 'OK'].map(x => (
-                          <button
-                            key={x}
-                            onClick={() => setAlertStatus(x)}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                              alertStatus === x
-                                ? 'border-cyan-500 bg-cyan-500/15 text-cyan-200'
-                                : 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
-                            }`}
-                          >
-                            {x}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {expiringItems.map(item => {
-                    const status = getItemStatus(item.expiration_date)
-                    const days = getDaysUntilExpiration(item.expiration_date)
-                    const client = clients.find(c => c.id === item.client_id)
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => { setEditItem(item); setModalOpen(true) }}
-                        className={`rounded-2xl border p-4 cursor-pointer hover:bg-slate-800/60 transition-all ${
-                          status === 'Vencido'
-                            ? 'border-rose-500/30 bg-rose-500/5'
-                            : 'border-amber-500/30 bg-amber-500/5'
-                        }`}
-                      >
-                        <p className="text-xs text-slate-400">{client?.name}</p>
-                        <p className="font-medium text-sm mt-1">{item.name}</p>
-                        <p className="text-xs text-slate-500">{item.category}</p>
-                        {isProcessStale(item) && (
-                          <div className="mt-2 flex items-center gap-1.5 text-xs text-orange-400 bg-orange-500/10 border border-orange-500/30 rounded-lg px-2 py-1">
-                            <AlertTriangle size={11} />
-                            <span>Sin seguimiento +5 días</span>
-                          </div>
-                        )}
-                        <div className="mt-3 flex items-center justify-between">
-                          <span className={`text-sm font-semibold ${
-                            status === 'Vencido' ? 'text-rose-400' : 'text-amber-300'
-                          }`}>
-                            {status === 'Vencido' ? 'Vencido' : `${days} días`}
-                          </span>
-                          <span className="text-xs text-slate-500">{item.expiration_date}</span>
-                        </div>
-                      </div>
-                    )
-                  })}
+
+                {/* Días / Estado */}
+                <div className="flex items-center gap-2.5 flex-shrink-0">
+                  <span className="text-xs text-slate-500 font-mono hidden sm:inline">{item.expiration_date}</span>
+                  <span className={`text-sm font-bold tabular-nums ${
+                    status === 'Vencido' ? 'text-rose-400' : 'text-amber-300'
+                  }`}>
+                    {status === 'Vencido' ? 'Vencido' : `${days}d`}
+                  </span>
+                  <ChevronRight size={14} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
                 </div>
               </div>
-            )}
+            )
+          })}
+        </div>
+
+        {/* ===== "VER MÁS" si hay más de 5 ===== */}
+        {expiringItems.length > 5 && (
+          <button
+            onClick={() => { setStatsModal('expiring'); setModalSearch('') }}
+            className="w-full flex items-center justify-center gap-2 py-3 text-sm text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/[0.04] transition-all border-t border-amber-500/10"
+          >
+            Ver las {expiringItems.length} alertas
+            <ChevronRight size={14} />
+          </button>
+        )}
+      </>
+    )}
+  </div>
+)}
             {loading ? (
               <div className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-4">
