@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useRef, useCallback, ty
 import { supabase } from '../lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
 
-const INACTIVITY_TIMEOUT = 15 * 60 * 1000 // 15 minutes in ms
+const INACTIVITY_TIMEOUT = 5 * 60 * 1000 // 15 minutes in ms
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click']
 
 interface AuthContextType {
