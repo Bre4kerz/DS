@@ -70,22 +70,9 @@ export default function LoginPage() {
 
   return (
     <>
-      <style>{`
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(24px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
-
       <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-[#050d18]">
 
-        {/* Fondo - Memoizado para evitar recreación del canvas WebGL en cada render */}
+        {/* Fondo - Memoizado para evitar recreacion del canvas WebGL en cada render */}
         <div className="absolute inset-0 z-0">
           <MemoizedFloatingLines {...floatingLinesProps} />
         </div>
@@ -95,6 +82,8 @@ export default function LoginPage() {
           {...borderGlowProps}
           className="relative z-10 w-full max-w-md mx-4 backdrop-blur-md"
         >
+          <div className="p-8">
+            <div className="flex items-center justify-center mb-8">
               <img
                 src={logoImg}
                 alt="JoSYS"
@@ -150,7 +139,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* BOTÓN INICIAR SESIÓN REEMPLAZADO POR SPECULARBUTTON */}
+              {/* BOTON INICIAR SESION REEMPLAZADO POR SPECULARBUTTON */}
               <div className="flex justify-center">
                 <SpecularButton
                   type="submit"
