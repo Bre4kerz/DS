@@ -22,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const userRef = useRef<User | null>(null)
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
@@ -45,9 +46,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetTimer()
     ACTIVITY_EVENTS.forEach(e => window.addEventListener(e, resetTimer, { passive: true }))
 
+    // ⬇️ NUEVO: Reiniciar timer al volver a la pestaña
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        resetTimer()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
       ACTIVITY_EVENTS.forEach(e => window.removeEventListener(e, resetTimer))
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [user, resetTimer])
 
@@ -55,12 +65,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setUser(session?.user ?? null)
+      userRef.current = session?.user ?? null
       setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // ⬇️ NUEVO: Ignorar TOKEN_REFRESHED si el usuario no cambió
+      if (event === 'TOKEN_REFRESHED') {
+        const newUser = session?.user ?? null
+        if (newUser?.id === userRef.current?.id) {
+          // Solo actualizar la sesión, no el usuario (evita re-render)
+          setSession(session)
+          return
+        }
+      }
+
+      const newUser = session?.user ?? null
+      userRef.current = newUser
       setSession(session)
-      setUser(session?.user ?? null)
+      setUser(newUser)
     })
 
     return () => subscription.unsubscribe()
