@@ -95,10 +95,6 @@ export default function LoginPage() {
           {...borderGlowProps}
           className="relative z-10 w-full max-w-md mx-4 backdrop-blur-md"
         >
-          <div
-            className="p-8"
-            style={{ animation: 'fadeInUp 0.7s ease-out both' }}
-          >
             <div className="flex items-center justify-center mb-8">
               <img
                 src={logoImg}
