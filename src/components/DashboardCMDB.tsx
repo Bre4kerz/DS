@@ -436,18 +436,26 @@ export default function DashboardCMDB() {
     setAllItems(normalizedItems)
     setLoading(false)
   }, [])
+const hasFetchedRef = useRef(false)
 
-  useEffect(() => {
-    fetchData()
-    // Fetch user role
-    if (user?.email) {
-      supabase.from('cmdb_user_roles').select('*').eq('user_email', user.email).single()
-        .then(({ data }) => {
-          if (data) setUserRole(data.role as 'admin' | 'viewer')
-          else setUserRole('admin') // default admin if no role set
-        })
-    }
-  }, [fetchData, user])
+useEffect(() => {
+  if (hasFetchedRef.current) return
+  hasFetchedRef.current = true
+  
+  fetchData()
+}, [fetchData])
+
+// Separar la carga del rol del usuario
+useEffect(() => {
+  if (!user?.email) return
+  
+  supabase.from('cmdb_user_roles').select('*').eq('user_email', user.email).single()
+    .then(({ data }) => {
+      if (data) setUserRole(data.role as 'admin' | 'viewer')
+      else setUserRole('admin')
+    })
+}, [user])
+
 
   useEffect(() => {
     if (clients.length > 0 && !selectedClientId) {
