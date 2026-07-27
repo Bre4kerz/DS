@@ -50,6 +50,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 8. **Medio — calidad y regresiones.** No hay pruebas. Priorizar tests para cálculo de vencimientos, agrupación/filtros, permisos, CRUD, historial y flujos de autenticación; integrar `typecheck`, `lint`, tests y build en CI.
 
+   **Actualización 2026-08-01:** se añadió infraestructura para correos de expiración y calidad de datos. `20260801_add_expiration_email_alerts.sql` crea configuración, auditoría de entregas y problemas deduplicados. `send-expiration-alerts` valida licencias, resuelve incidencias corregidas, evita correos duplicados y envía resúmenes mediante Resend. El dashboard permite configurar alertas y consultar problemas. Falta aplicar la migración, desplegar la Edge Function, configurar `RESEND_API_KEY`/`CRON_SECRET` y crear el Cron diario.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.

@@ -98,6 +98,17 @@ function CredentialField({ label, value }: { label: string; value: string }) {
   )
 }
 
+type QualityIssue = {
+  id: string
+  item_id: string | null
+  issue_code: string
+  severity: 'critical' | 'error' | 'warning'
+  field_name: string | null
+  message: string
+  last_detected_at: string
+  resolved_at: string | null
+}
+
 function CopyableIp({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
 
@@ -477,6 +488,17 @@ export default function DashboardCMDB() {
   const [categoryFilter, setCategoryFilter] = useState<string>('All')
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
   const [rolesModal, setRolesModal] = useState(false)
+  const [alertSettingsModal, setAlertSettingsModal] = useState(false)
+  const [qualityIssuesModal, setQualityIssuesModal] = useState(false)
+  const [qualityIssues, setQualityIssues] = useState<QualityIssue[]>([])
+  const [alertSettings, setAlertSettings] = useState({
+    enabled: false,
+    thresholds: '90, 60, 30, 15, 7, 1, 0',
+    recipients: '',
+    from_email: '',
+  })
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false)
+  const [alertSettingsMessage, setAlertSettingsMessage] = useState('')
   const [newRoleEmail, setNewRoleEmail] = useState('')
   const [newRoleValue, setNewRoleValue] = useState<'admin' | 'viewer'>('viewer')
   const [roleError, setRoleError] = useState('')
@@ -614,6 +636,61 @@ export default function DashboardCMDB() {
   const fetchRoles = async () => {
     await loadRoles()
     setRolesModal(true)
+  }
+
+  const fetchQualityIssues = async (openModal = false) => {
+    const { data } = await supabase
+      .from('cmdb_data_quality_issues')
+      .select('*')
+      .is('resolved_at', null)
+      .order('last_detected_at', { ascending: false })
+    setQualityIssues((data ?? []) as QualityIssue[])
+    if (openModal) setQualityIssuesModal(true)
+  }
+
+  const openAlertSettings = async () => {
+    setAlertSettingsMessage('')
+    const { data, error } = await supabase.from('cmdb_alert_settings').select('*').eq('id', true).single()
+    if (error) {
+      setAlertSettingsMessage(error.message)
+    } else if (data) {
+      setAlertSettings({
+        enabled: data.enabled,
+        thresholds: (data.thresholds ?? []).join(', '),
+        recipients: (data.recipients ?? []).join('\n'),
+        from_email: data.from_email ?? '',
+      })
+    }
+    setAlertSettingsModal(true)
+  }
+
+  const saveAlertSettings = async () => {
+    const thresholds = [...new Set(
+      alertSettings.thresholds.split(',').map(value => Number.parseInt(value.trim(), 10)).filter(Number.isFinite)
+    )].sort((a, b) => b - a)
+    const recipients = [...new Set(
+      alertSettings.recipients.split(/[\n,;]/).map(value => value.trim().toLowerCase()).filter(Boolean)
+    )]
+    if (thresholds.length === 0) {
+      setAlertSettingsMessage('Add at least one valid threshold.')
+      return
+    }
+    if (alertSettings.enabled && (!alertSettings.from_email.trim() || recipients.length === 0)) {
+      setAlertSettingsMessage('Sender and at least one recipient are required when alerts are enabled.')
+      return
+    }
+    setSavingAlertSettings(true)
+    setAlertSettingsMessage('')
+    const { error } = await supabase.from('cmdb_alert_settings').update({
+      enabled: alertSettings.enabled,
+      thresholds,
+      recipients,
+      from_email: alertSettings.from_email.trim(),
+      updated_at: new Date().toISOString(),
+      updated_by: user?.id ?? null,
+    }).eq('id', true)
+    setAlertSettingsMessage(error ? error.message : 'Settings saved.')
+    setSavingAlertSettings(false)
   }
 
   const saveRole = async () => {
@@ -758,6 +835,10 @@ export default function DashboardCMDB() {
   )].sort()
   const adminRoleCount = allRoles.filter(role => role.role === 'admin').length
 
+  useEffect(() => {
+    if (!loading) fetchQualityIssues()
+  }, [loading])
+
   return (
     <div className="min-h-screen bg-[#050d18] text-white font-sans">
       {/* Header */}
@@ -779,6 +860,14 @@ export default function DashboardCMDB() {
             </button>
             {userRole === 'admin' && (
               <>
+                <button
+                  onClick={openAlertSettings}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-colors"
+                  title="Configure email alerts"
+                >
+                  <Calendar size={14} />
+                  <span className="hidden md:inline">Email alerts</span>
+                </button>
                 <button
                   onClick={fetchRoles}
                   className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
@@ -863,6 +952,19 @@ export default function DashboardCMDB() {
               <button onClick={() => { setStatsModal('total'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
                 <p className="text-xs text-slate-400">Total Items</p>
                 <p className="mt-1 text-2xl font-bold">{globalStats.total}</p>
+              </button>
+              <button
+                onClick={() => fetchQualityIssues(true)}
+                className={`col-span-2 rounded-2xl border p-4 text-left transition-colors ${
+                  qualityIssues.length > 0
+                    ? 'border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/15'
+                    : 'border-slate-800 bg-slate-900 hover:bg-slate-800'
+                }`}
+              >
+                <p className="text-xs text-slate-400">Data Quality Issues</p>
+                <p className={`mt-1 text-2xl font-bold ${qualityIssues.length > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                  {qualityIssues.length}
+                </p>
               </button>
 
             </div>
@@ -1308,6 +1410,132 @@ export default function DashboardCMDB() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Alert Settings Modal */}
+      {alertSettingsModal && (
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setAlertSettingsModal(false)}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Calendar size={17} className="text-amber-400" />
+                <h3 className="font-semibold">Expiration email alerts</h3>
+              </div>
+              <button onClick={() => setAlertSettingsModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <label className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
+                <span>
+                  <span className="block text-sm font-medium">Enable scheduled emails</span>
+                  <span className="block text-xs text-slate-500">The Cron job still needs to be activated in Supabase.</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={alertSettings.enabled}
+                  onChange={event => setAlertSettings(current => ({ ...current, enabled: event.target.checked }))}
+                  className="h-4 w-4 accent-cyan-500"
+                />
+              </label>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 uppercase tracking-wide">Sender email</label>
+                <input
+                  value={alertSettings.from_email}
+                  onChange={event => setAlertSettings(current => ({ ...current, from_email: event.target.value }))}
+                  placeholder="CMDB Alerts <alerts@example.com>"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 uppercase tracking-wide">Recipients</label>
+                <textarea
+                  value={alertSettings.recipients}
+                  onChange={event => setAlertSettings(current => ({ ...current, recipients: event.target.value }))}
+                  rows={4}
+                  placeholder={'admin@example.com\nrenewals@example.com'}
+                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-500"
+                />
+                <p className="text-[11px] text-slate-500">One address per line, or separate with commas.</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 uppercase tracking-wide">Thresholds (days)</label>
+                <input
+                  value={alertSettings.thresholds}
+                  onChange={event => setAlertSettings(current => ({ ...current, thresholds: event.target.value }))}
+                  placeholder="90, 60, 30, 15, 7, 1, 0"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-500"
+                />
+              </div>
+              {alertSettingsMessage && (
+                <p className={`rounded-xl border px-3 py-2 text-xs ${
+                  alertSettingsMessage === 'Settings saved.'
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                }`}>{alertSettingsMessage}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-800 p-5">
+              <button onClick={() => setAlertSettingsModal(false)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">Close</button>
+              <button
+                onClick={saveAlertSettings}
+                disabled={savingAlertSettings}
+                className="rounded-xl bg-cyan-600 px-4 py-2 text-sm hover:bg-cyan-500 disabled:opacity-50"
+              >
+                {savingAlertSettings ? 'Saving…' : 'Save settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data Quality Modal */}
+      {qualityIssuesModal && (
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setQualityIssuesModal(false)}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-800 p-5">
+              <div>
+                <h3 className="font-semibold">Data Quality Issues</h3>
+                <p className="text-xs text-slate-500">{qualityIssues.length} unresolved issue(s)</p>
+              </div>
+              <button onClick={() => setQualityIssuesModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {qualityIssues.length === 0 ? (
+                <div className="py-10 text-center text-emerald-400">
+                  <CheckCircle size={30} className="mx-auto mb-2" />
+                  <p className="text-sm">No unresolved data issues.</p>
+                </div>
+              ) : qualityIssues.map(issue => {
+                const item = allItems.find(candidate => candidate.id === issue.item_id)
+                const client = clients.find(candidate => candidate.id === item?.client_id)
+                return (
+                  <button
+                    key={issue.id}
+                    onClick={() => {
+                      if (item) navigateToItem(item)
+                      setQualityIssuesModal(false)
+                    }}
+                    className="w-full rounded-xl border border-slate-800 bg-slate-800/40 p-4 text-left transition-colors hover:border-slate-600 hover:bg-slate-800"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{item?.name ?? 'Unknown license'}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{client?.name ?? 'Unknown client'} · {issue.field_name ?? issue.issue_code}</p>
+                        <p className="mt-2 text-xs text-slate-300">{issue.message}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-[10px] uppercase ${
+                        issue.severity === 'critical'
+                          ? 'bg-rose-500/15 text-rose-300'
+                          : issue.severity === 'error'
+                            ? 'bg-orange-500/15 text-orange-300'
+                            : 'bg-amber-500/15 text-amber-300'
+                      }`}>{issue.severity}</span>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>
