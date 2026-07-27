@@ -9,7 +9,7 @@ export type ClientWithItems = CmdbClient & {
 }
 
 const CMDB_ITEM_SELECT = `
-  id, client_id, category, type, item_type, name, domain_version, role_use,
+  id, client_id, category, type, item_type, name, domain_version, role_use, vendor, branch, qty,
   ip, serial, email, expiration_date, notes, sort_order, status, process,
   process_updated_at, updated_by, created_at, updated_at, has_credentials
 `

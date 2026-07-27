@@ -30,8 +30,9 @@ type Props = {
   item: CmdbItem | null
   clients: CmdbClient[]
   categories: string[]
+  licenseTypes: string[]
   onClose: () => void
-  onSaved: () => void
+  onSaved: (savedItem: { id: string; client_id: string; category: string }) => void
 }
 
 type FormData = {
@@ -41,6 +42,9 @@ type FormData = {
   name: string
   domain_version: string
   role_use: string
+  vendor: string
+  branch: string
+  qty: string
   ip: string
   serial: string
   email: string
@@ -58,7 +62,7 @@ type FormData = {
 
 const EMPTY: FormData = {
   client_id: '', category: '', item_type: '', name: '',
-  domain_version: '', role_use: '', ip: '', serial: '', email: '', expiration_date: '', notes: '',
+  domain_version: '', role_use: '', vendor: '', branch: '', qty: '1', ip: '', serial: '', email: '', expiration_date: '', notes: '',
   status: 'No date', process: '', process_updated_at: null,
   cred_user: '', cred_password: '', cred_user_alt: '', cred_password_alt: '', cred_notes: ''
 }
@@ -72,7 +76,106 @@ const SELECT_STYLE = {
 
 const SELECT_CLASS = "w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:border-blue-500 outline-none transition-colors appearance-none bg-no-repeat"
 
-export default function ItemModal({ item, clients, categories, onClose, onSaved }: Props) {
+function CreatableCombobox({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder,
+  helper,
+}: {
+  label: string
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+  placeholder: string
+  helper: string
+}) {
+  const [open, setOpen] = useState(false)
+  const query = value.trim().toLowerCase()
+  const hasExactMatch = options.some(option => option.toLowerCase() === query)
+  const filterQuery = hasExactMatch ? '' : query
+  const filteredOptions = options
+    .filter(option => !filterQuery || option.toLowerCase().includes(filterQuery))
+    .slice(0, 10)
+  const isNewValue = value.trim() && !hasExactMatch
+
+  return (
+    <div className="space-y-1.5 relative">
+      <label className="text-xs text-slate-400 uppercase tracking-wide">{label}</label>
+      <div className="relative">
+        <input
+          type="text"
+          value={value}
+          onChange={event => {
+            onChange(event.target.value)
+            setOpen(true)
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          onKeyDown={event => {
+            if (event.key === 'Escape') setOpen(false)
+            if (event.key === 'Enter' && open) {
+              event.preventDefault()
+              setOpen(false)
+            }
+          }}
+          placeholder={placeholder}
+          autoComplete="off"
+          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 pr-10 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors"
+        />
+        <button
+          type="button"
+          onMouseDown={event => event.preventDefault()}
+          onClick={() => setOpen(current => !current)}
+          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 hover:text-white"
+          aria-label={`Toggle ${label.toLowerCase()} options`}
+        >
+          <ChevronDown size={15} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+
+        {open && (
+          <div className="absolute z-40 mt-1.5 max-h-52 w-full overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl shadow-black/40">
+            {filteredOptions.map(option => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => {
+                  onChange(option)
+                  setOpen(false)
+                }}
+                className={`w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  option === value
+                    ? 'bg-cyan-500/15 text-cyan-300'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+            {isNewValue && (
+              <button
+                type="button"
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => setOpen(false)}
+                className="w-full rounded-lg border border-dashed border-cyan-500/30 px-3 py-2 text-left text-sm text-cyan-300 transition-colors hover:bg-cyan-500/10"
+              >
+                + Add “{value.trim()}”
+              </button>
+            )}
+            {filteredOptions.length === 0 && !isNewValue && (
+              <p className="px-3 py-3 text-center text-xs text-slate-500">No options found</p>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-500">{helper}</p>
+    </div>
+  )
+}
+
+export default function ItemModal({ item, clients, categories, licenseTypes, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const [form, setForm] = useState<FormData>(EMPTY)
   const [saving, setSaving] = useState(false)
@@ -94,6 +197,9 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
         name: item.name ?? '',
         domain_version: item.domain_version ?? '',
         role_use: item.role_use ?? '',
+        vendor: item.vendor ?? '',
+        branch: item.branch ?? '',
+        qty: String(item.qty ?? 1),
         ip: item.ip ?? '',
         serial: item.serial ?? '',
         email: item.email ?? '',
@@ -176,13 +282,14 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
     const payload = {
       ...itemFields,
       type: form.category,
+      qty: Math.max(0, Number.parseInt(form.qty, 10) || 0),
       expiration_date: form.expiration_date || null,
       updated_at: new Date().toISOString(),
     }
     if (item) {
       // Build diff for history
       const changes: Record<string, { from: unknown; to: unknown }> = {}
-      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','ip','serial','expiration_date','status','process','notes']
+      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','vendor','branch','qty','ip','serial','expiration_date','status','process','notes']
       trackFields.forEach(field => {
         const oldVal = item[field] ?? ''
         const newVal = payload[field] ?? ''
@@ -206,6 +313,7 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
           changes,
         })
       }
+      onSaved({ id: item.id, client_id: form.client_id, category: form.category })
     } else {
       const { data: newItem, error: itemError } = await supabase
         .from('cmdb_items')
@@ -220,8 +328,8 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
         password_alt: cred_password_alt,
         notes: cred_notes,
       })
+      onSaved({ id: newItem.id, client_id: form.client_id, category: form.category })
     }
-      onSaved()
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not save the record')
     } finally {
@@ -231,6 +339,11 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
 
   const itemTypes = form.category ? (ITEM_TYPES[form.category] ?? []) : []
   const isLicense = form.category === 'Licenses'
+  const availableLicenseTypes = [...new Set([
+    ...(ITEM_TYPES.Licenses ?? []),
+    ...licenseTypes,
+    ...(form.item_type ? [form.item_type] : []),
+  ])].sort()
   const renewalStyle = {
     'OK':       { border: 'border-emerald-500/40', bg: 'bg-emerald-500/8',  icon: 'text-emerald-400', label: 'text-emerald-300' },
     'Expiring':  { border: 'border-amber-500/40',   bg: 'bg-amber-500/8',    icon: 'text-amber-400',   label: 'text-amber-300'   },
@@ -240,9 +353,9 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
 
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col"
+        className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
@@ -291,37 +404,38 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
 
             {/* Categoría / Type */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 uppercase tracking-wide">Category *</label>
-                <select
-                  value={form.category}
-                  onChange={e => setForm(f => ({ ...f, category: e.target.value, item_type: '' }))}
-                  className={SELECT_CLASS} style={SELECT_STYLE}
-                >
-                  <option value="">Select...</option>
-                  {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 uppercase tracking-wide">Type</label>
-                {itemTypes.length > 0 ? (
-                  <select value={form.item_type} onChange={set('item_type')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                    <option value="">Select...</option>
-                    {itemTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={form.item_type}
-                    onChange={set('item_type')}
-                    placeholder="e.g. Virtual, Physical..."
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors"
-                  />
-                )}
-              </div>
+              <CreatableCombobox
+                label="Category *"
+                value={form.category}
+                options={allCategories}
+                onChange={category => setForm(current => ({
+                  ...current,
+                  category,
+                  item_type: category === current.category ? current.item_type : '',
+                }))}
+                placeholder="Select or enter a new category..."
+                helper="You can enter a new category; it will be available in future records."
+              />
+              <CreatableCombobox
+                label="Type"
+                value={form.item_type}
+                options={isLicense ? availableLicenseTypes : itemTypes}
+                onChange={itemType => setForm(current => ({ ...current, item_type: itemType }))}
+                placeholder={isLicense ? 'Select or enter a new license type...' : 'Select or enter a type...'}
+                helper={isLicense
+                  ? 'You can enter a new type; it will be available in future license records.'
+                  : 'Select a suggested type or enter a custom value.'}
+              />
             </div>
 
             <Field label="System name *" value={form.name} onChange={set('name')} placeholder="e.g. DC-01, FortiGate 100F..." />
+
+            {isLicense && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="Vendor" value={form.vendor} onChange={set('vendor')} placeholder="e.g. Microsoft, VMware..." />
+                <Field label="Branch" value={form.branch} onChange={set('branch')} placeholder="e.g. HQ, Monterrey..." />
+              </div>
+            )}
 
             {!isLicense && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -407,8 +521,9 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
 
                 {showRenewal && (
                   <div className="mt-4 space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <Field label="Serial / License" value={form.serial} onChange={set('serial')} placeholder="XXXX-XXXX-XXXX" mono />
+                      <Field label="QTY" value={form.qty} onChange={set('qty')} placeholder="1" type="number" />
                       <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
                     </div>
 

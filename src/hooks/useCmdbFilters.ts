@@ -21,7 +21,9 @@ export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[])
         i.name?.toLowerCase().includes(q) ||
         i.ip?.toLowerCase().includes(q) ||
         i.serial?.toLowerCase().includes(q) ||
-        i.domain_version?.toLowerCase().includes(q)
+        i.domain_version?.toLowerCase().includes(q) ||
+        i.vendor?.toLowerCase().includes(q) ||
+        i.branch?.toLowerCase().includes(q)
       )
       .slice(0, 10)
       .map(i => ({
@@ -48,7 +50,9 @@ export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[])
         c.items.some(i =>
           i.name.toLowerCase().includes(q) ||
           i.ip?.toLowerCase().includes(q) ||
-          i.email?.toLowerCase().includes(q)
+          i.email?.toLowerCase().includes(q) ||
+          i.vendor?.toLowerCase().includes(q) ||
+          i.branch?.toLowerCase().includes(q)
         )
       )
     })

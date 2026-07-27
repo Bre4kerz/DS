@@ -21,6 +21,9 @@ export type CmdbItem = {
   name: string
   domain_version: string
   role_use: string
+  vendor: string
+  branch: string
+  qty: number
   ip: string
   serial: string
   email: string

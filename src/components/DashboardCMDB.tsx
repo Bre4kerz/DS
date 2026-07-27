@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { Fragment, useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import logoImg from '../assets/logo1.png'
 import {
@@ -98,6 +98,39 @@ function CredentialField({ label, value }: { label: string; value: string }) {
   )
 }
 
+function CopyableIp({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const copyIp = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (!value) return
+    await navigator.clipboard.writeText(value)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  if (!value) return <span className="text-slate-600">—</span>
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="font-mono text-cyan-400/80 text-[11px] truncate">{value}</span>
+      <button
+        type="button"
+        onClick={copyIp}
+        className={`rounded-md p-1 transition-colors ${
+          copied
+            ? 'bg-emerald-500/15 text-emerald-300'
+            : 'text-slate-600 hover:bg-slate-700 hover:text-cyan-300'
+        }`}
+        title={copied ? 'Copied' : 'Copy IP'}
+        aria-label={copied ? 'IP copied' : `Copy IP ${value}`}
+      >
+        {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
+      </button>
+    </div>
+  )
+}
+
 function SecureCredentialsPanel({ itemId }: { itemId: string }) {
   const [credentials, setCredentials] = useState<Credentials | null>(null)
   const [loading, setLoading] = useState(true)
@@ -178,7 +211,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
   }, [highlightedItemId, section.rows])
 
   return (
-    <div className={`overflow-hidden rounded-2xl border transition-all duration-300 ${
+    <div className={`overflow-hidden rounded-2xl border transition-colors duration-200 ${
       hasExpiring ? 'border-amber-500/20 shadow-lg shadow-amber-500/5' : 'border-slate-800/60'
     } bg-[#0a1220]`}>
 
@@ -252,20 +285,32 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                   const isHighlighted = highlightedItemId === row.id
 
                   return (
-                    <>
+                    <Fragment key={row.id}>
                       <tr
                         id={'item-' + row.id}
-                        key={row.id}
-                        className={`border-b border-slate-800/40 transition-all duration-500 ${
+                        onClick={() => {
+                          if (creds) toggleRow(row.id)
+                        }}
+                        onKeyDown={event => {
+                          if (creds && (event.key === 'Enter' || event.key === ' ')) {
+                            event.preventDefault()
+                            toggleRow(row.id)
+                          }
+                        }}
+                        tabIndex={creds ? 0 : undefined}
+                        className={`border-b border-slate-800/40 transition-[background-color,border-color,box-shadow] duration-200 ${
                           isHighlighted
                             ? 'bg-cyan-500/15 border-l-2 border-l-cyan-400/60 glow-row'
                             : idx % 2 === 0 ? 'bg-transparent' : 'bg-slate-900/20'
-                        } hover:bg-slate-800/30`}
+                        } hover:bg-slate-800/30 ${creds ? 'cursor-pointer focus:outline-none focus:ring-1 focus:ring-inset focus:ring-cyan-500/40' : ''}`}
                       >
                         <td className="px-5 py-3">
                           {creds ? (
                             <button
-                              onClick={() => toggleRow(row.id)}
+                              onClick={event => {
+                                event.stopPropagation()
+                                toggleRow(row.id)
+                              }}
                               className="p-1 rounded-md hover:bg-slate-700/50 transition-colors"
                             >
                               {isExpanded 
@@ -288,6 +333,15 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                             {row.item.notes && (
                               <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[200px]">{row.item.notes}</p>
                             )}
+                            {(row.item.vendor || row.item.branch || row.item.category === 'Licenses') && (
+                              <p className="text-[10px] text-cyan-500/70 mt-0.5 truncate max-w-[220px]">
+                                {[
+                                  row.item.vendor,
+                                  row.item.branch,
+                                  row.item.category === 'Licenses' ? `QTY: ${row.item.qty ?? 1}` : '',
+                                ].filter(Boolean).join(' · ')}
+                              </p>
+                            )}
                           </div>
                         </td>
 
@@ -300,7 +354,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                         </td>
 
                         <td className="px-3 py-3 hidden sm:table-cell">
-                          <span className="font-mono text-cyan-400/80 text-[11px]">{row.ip || '—'}</span>
+                          <CopyableIp value={row.ip} />
                         </td>
 
                         <td className="px-3 py-3">
@@ -308,7 +362,10 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                         </td>
 
                         <td className="px-5 py-3">
-                          <div className="flex items-center justify-end gap-1">
+                          <div
+                            className="flex items-center justify-end gap-1"
+                            onClick={event => event.stopPropagation()}
+                          >
                             <button
                               onClick={() => onHistory(row.item)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-all"
@@ -358,7 +415,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
               </tbody>
@@ -450,7 +507,9 @@ export default function DashboardCMDB() {
       i.name?.toLowerCase().includes(q) ||
       i.ip?.toLowerCase().includes(q) ||
       i.serial?.toLowerCase().includes(q) ||
-      i.domain_version?.toLowerCase().includes(q)
+      i.domain_version?.toLowerCase().includes(q) ||
+      i.vendor?.toLowerCase().includes(q) ||
+      i.branch?.toLowerCase().includes(q)
     )
     const results: Array<{ item: CmdbItem; client: CmdbClient | undefined }> = []
     // Add matching clients as client entries (use first item as anchor)
@@ -489,7 +548,9 @@ export default function DashboardCMDB() {
         c.items.some(i =>
           i.name.toLowerCase().includes(q) ||
           i.ip?.toLowerCase().includes(q) ||
-          i.email?.toLowerCase().includes(q)
+          i.email?.toLowerCase().includes(q) ||
+          i.vendor?.toLowerCase().includes(q) ||
+          i.branch?.toLowerCase().includes(q)
         )
       )
     })
@@ -667,7 +728,34 @@ export default function DashboardCMDB() {
     }
   }
 
+  const highlightSavedItem = (savedItem: { id: string; client_id: string; category: string }) => {
+    setSelectedClientId(savedItem.client_id)
+    setOpenSections(previous => new Set([...previous, savedItem.category]))
+    setHighlightedItemId(savedItem.id)
+    setTimeout(() => {
+      document.getElementById(`item-${savedItem.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 350)
+    setTimeout(() => setHighlightedItemId(null), 4000)
+  }
+
+  const closeItemModal = () => {
+    setModalOpen(false)
+    setEditItem(null)
+  }
+
+  const handleItemSaved = async (savedItem: { id: string; client_id: string; category: string }) => {
+    await fetchData()
+    setModalOpen(false)
+    setEditItem(null)
+    highlightSavedItem(savedItem)
+  }
+
   const categories = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort()
+  const licenseTypes = [...new Set(
+    allItems
+      .filter(item => item.category === 'Licenses' && item.item_type)
+      .map(item => item.item_type)
+  )].sort()
   const adminRoleCount = allRoles.filter(role => role.role === 'admin').length
 
   return (
@@ -1069,7 +1157,11 @@ export default function DashboardCMDB() {
                         defaultOpen={openSections.has(section.title)}
                         highlightedItemId={highlightedItemId}
                         isAdmin={userRole === 'admin'}
-                        onEdit={item => { setEditItem(item); setModalOpen(true) }}
+                        onEdit={item => {
+                          setOpenSections(previous => new Set([...previous, item.category]))
+                          setEditItem(item)
+                          setModalOpen(true)
+                        }}
                         onDelete={id => setDeleteConfirm(id)}
                         onDuplicate={duplicateItem}
                         onHistory={fetchHistory}
@@ -1101,15 +1193,16 @@ export default function DashboardCMDB() {
           item={editItem}
           clients={clients}
           categories={categories}
-          onClose={() => { setModalOpen(false); setEditItem(null) }}
-          onSaved={() => { setModalOpen(false); setEditItem(null); fetchData() }}
+          licenseTypes={licenseTypes}
+          onClose={closeItemModal}
+          onSaved={handleItemSaved}
         />
       )}
 
       {/* Delete confirm */}
       {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirm(null)}>
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 text-rose-400">
               <AlertTriangle size={24} />
               <h3 className="font-semibold text-lg">Confirm deletion</h3>
@@ -1142,8 +1235,8 @@ export default function DashboardCMDB() {
 
       {/* Edit Client Name Modal */}
       {editClientId && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setEditClientId(null); setEditClientName('') }}>
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => { setEditClientId(null); setEditClientName('') }}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 text-cyan-400">
               <Pencil size={24} />
               <h3 className="font-semibold text-lg">Edit client name</h3>
@@ -1183,8 +1276,8 @@ export default function DashboardCMDB() {
 
       {/* History Modal */}
       {historyItem && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setHistoryItem(null)}>
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setHistoryItem(null)}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <History size={16} className="text-cyan-400" />
@@ -1222,8 +1315,8 @@ export default function DashboardCMDB() {
 
       {/* Roles Modal */}
       {rolesModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setRolesModal(false)}>
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setRolesModal(false)}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Users size={16} className="text-cyan-400" />
@@ -1304,11 +1397,11 @@ export default function DashboardCMDB() {
           </div>
           {pendingRoleAction && (
             <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+              className="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4"
               onClick={() => setPendingRoleAction(null)}
             >
               <div
-                className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
+                className="modal-surface w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
                 onClick={event => event.stopPropagation()}
               >
                 <h4 className="text-lg font-semibold text-white">Confirm role change</h4>
@@ -1345,8 +1438,8 @@ export default function DashboardCMDB() {
       )}
       {/* Stats Detail Modal */}
       {statsModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setStatsModal(null); setModalSearch('') }}>
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => { setStatsModal(null); setModalSearch('') }}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <h3 className="font-semibold text-lg">
                 {statsModal === 'clients' && `Clients (${globalStats.clients})`}
