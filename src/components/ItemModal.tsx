@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { X, Save, Loader2, Lock, RefreshCw, ChevronDown } from 'lucide-react'
-import { supabase, CmdbClient, CmdbItem, getItemStatus } from '../lib/supabase'
+import {
+  supabase,
+  CmdbClient,
+  CmdbItem,
+  getItemStatus,
+  hasCredentials,
+  revealCredentials,
+  saveCredentials,
+} from '../lib/supabase'
 
 const CATEGORIES = ['Servidores', 'NAS/Storage', 'Remote Access', 'OA Devices', 'Managed services', 'Licenses', 'Services', 'Firewall', 'VPN', 'Antivirus', 'Backup', 'Red', 'Otro']
 const ITEM_TYPES: Record<string, string[]> = {
@@ -51,7 +59,7 @@ type FormData = {
 const EMPTY: FormData = {
   client_id: '', category: '', item_type: '', name: '',
   domain_version: '', role_use: '', ip: '', serial: '', email: '', expiration_date: '', notes: '',
-  status: 'Sin fecha', process: '', process_updated_at: null,
+  status: 'No date', process: '', process_updated_at: null,
   cred_user: '', cred_password: '', cred_user_alt: '', cred_password_alt: '', cred_notes: ''
 }
 
@@ -73,6 +81,7 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
   const [addingClient, setAddingClient] = useState(false)
   const [showCreds, setShowCreds] = useState(false)
   const [showRenewal, setShowRenewal] = useState(false)
+  const [loadingCredentials, setLoadingCredentials] = useState(false)
 
   const allCategories = [...new Set([...CATEGORIES, ...categories])].sort()
 
@@ -93,12 +102,30 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
         status: item.status || getItemStatus(item.expiration_date),
         process: item.process ?? '',
         process_updated_at: item.process_updated_at ?? null,
-        cred_user: item.cred_user ?? '',
-        cred_password: item.cred_password ?? '',
-        cred_user_alt: item.cred_user_alt ?? '',
-        cred_password_alt: item.cred_password_alt ?? '',
-        cred_notes: item.cred_notes ?? '',
+        cred_user: '',
+        cred_password: '',
+        cred_user_alt: '',
+        cred_password_alt: '',
+        cred_notes: '',
       })
+      if (hasCredentials(item)) {
+        setLoadingCredentials(true)
+        revealCredentials(item.id)
+          .then(credentials => {
+            setForm(current => ({
+              ...current,
+              cred_user: credentials.user,
+              cred_password: credentials.password,
+              cred_user_alt: credentials.user_alt,
+              cred_password_alt: credentials.password_alt,
+              cred_notes: credentials.notes,
+            }))
+          })
+          .catch(fetchError => {
+            setError(fetchError instanceof Error ? fetchError.message : 'Could not load credentials')
+          })
+          .finally(() => setLoadingCredentials(false))
+      }
     } else {
       setForm(EMPTY)
     }
@@ -133,12 +160,21 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.client_id) { setError('Selecciona un cliente'); return }
-    if (!form.name.trim()) { setError('El nombre es requerido'); return }
+    if (!form.client_id) { setError('Select a client'); return }
+    if (!form.name.trim()) { setError('Name is required'); return }
     setError('')
     setSaving(true)
+    try {
+    const {
+      cred_user,
+      cred_password,
+      cred_user_alt,
+      cred_password_alt,
+      cred_notes,
+      ...itemFields
+    } = form
     const payload = {
-      ...form,
+      ...itemFields,
       type: form.category,
       expiration_date: form.expiration_date || null,
       updated_at: new Date().toISOString(),
@@ -146,15 +182,23 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
     if (item) {
       // Build diff for history
       const changes: Record<string, { from: unknown; to: unknown }> = {}
-      const trackFields = ['name','category','item_type','ip','serial','expiration_date','status','process','notes','cred_user','cred_user_alt']
+      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','ip','serial','expiration_date','status','process','notes']
       trackFields.forEach(field => {
-        const oldVal = (item as any)[field] ?? ''
-        const newVal = (payload as any)[field] ?? ''
+        const oldVal = item[field] ?? ''
+        const newVal = payload[field] ?? ''
         if (String(oldVal) !== String(newVal)) {
           changes[field] = { from: oldVal, to: newVal }
         }
       })
-      await supabase.from('cmdb_items').update({ ...payload, updated_by: user?.email ?? '' }).eq('id', item.id)
+      const { error: itemError } = await supabase.from('cmdb_items').update({ ...payload, updated_by: user?.email ?? '' }).eq('id', item.id)
+      if (itemError) throw itemError
+      await saveCredentials(item.id, {
+        user: cred_user,
+        password: cred_password,
+        user_alt: cred_user_alt,
+        password_alt: cred_password_alt,
+        notes: cred_notes,
+      })
       if (Object.keys(changes).length > 0) {
         await supabase.from('cmdb_item_history').insert({
           item_id: item.id,
@@ -163,18 +207,34 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
         })
       }
     } else {
-      await supabase.from('cmdb_items').insert({ ...payload, updated_by: user?.email ?? '' })
+      const { data: newItem, error: itemError } = await supabase
+        .from('cmdb_items')
+        .insert({ ...payload, updated_by: user?.email ?? '' })
+        .select('id')
+        .single()
+      if (itemError) throw itemError
+      await saveCredentials(newItem.id, {
+        user: cred_user,
+        password: cred_password,
+        user_alt: cred_user_alt,
+        password_alt: cred_password_alt,
+        notes: cred_notes,
+      })
     }
-    setSaving(false)
-    onSaved()
+      onSaved()
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not save the record')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const itemTypes = form.category ? (ITEM_TYPES[form.category] ?? []) : []
   const isLicense = form.category === 'Licenses'
   const renewalStyle = {
     'OK':       { border: 'border-emerald-500/40', bg: 'bg-emerald-500/8',  icon: 'text-emerald-400', label: 'text-emerald-300' },
-    'Próximo':  { border: 'border-amber-500/40',   bg: 'bg-amber-500/8',    icon: 'text-amber-400',   label: 'text-amber-300'   },
-    'Vencido':  { border: 'border-rose-500/40',    bg: 'bg-rose-500/8',     icon: 'text-rose-400',    label: 'text-rose-300'    },
+    'Expiring':  { border: 'border-amber-500/40',   bg: 'bg-amber-500/8',    icon: 'text-amber-400',   label: 'text-amber-300'   },
+    'Expired':  { border: 'border-rose-500/40',    bg: 'bg-rose-500/8',     icon: 'text-rose-400',    label: 'text-rose-300'    },
   }[form.status] ?? { border: 'border-slate-700', bg: '', icon: 'text-cyan-400', label: 'text-cyan-300' }
 
 
@@ -186,7 +246,7 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
-          <h3 className="font-semibold text-lg">{item ? 'Editar registro' : 'Nuevo registro'}</h3>
+          <h3 className="font-semibold text-lg">{item ? 'Edit record' : 'New record'}</h3>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800">
             <X size={18} />
           </button>
@@ -200,12 +260,12 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
               </div>
             )}
 
-            {/* Cliente */}
+            {/* Client */}
             <div className="space-y-1.5">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">Cliente *</label>
+              <label className="text-xs text-slate-400 uppercase tracking-wide">Client *</label>
               <div className="flex gap-2">
                 <select value={form.client_id} onChange={set('client_id')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                  <option value="">Seleccionar cliente...</option>
+                  <option value="">Select client...</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
@@ -214,7 +274,7 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                   type="text"
                   value={newClient}
                   onChange={e => setNewClient(e.target.value)}
-                  placeholder="Agregar nuevo cliente..."
+                  placeholder="Add new client..."
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors"
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddClient() } }}
                 />
@@ -224,29 +284,29 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                   disabled={!newClient.trim() || addingClient}
                   className="bg-slate-700 hover:bg-slate-600 disabled:opacity-40 px-3 py-2 rounded-xl text-sm transition-all whitespace-nowrap"
                 >
-                  {addingClient ? <Loader2 size={14} className="animate-spin" /> : '+ Agregar'}
+                  {addingClient ? <Loader2 size={14} className="animate-spin" /> : '+ Add'}
                 </button>
               </div>
             </div>
 
-            {/* Categoría / Tipo */}
+            {/* Categoría / Type */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 uppercase tracking-wide">Categoría *</label>
+                <label className="text-xs text-slate-400 uppercase tracking-wide">Category *</label>
                 <select
                   value={form.category}
                   onChange={e => setForm(f => ({ ...f, category: e.target.value, item_type: '' }))}
                   className={SELECT_CLASS} style={SELECT_STYLE}
                 >
-                  <option value="">Seleccionar...</option>
+                  <option value="">Select...</option>
                   {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-400 uppercase tracking-wide">Tipo</label>
+                <label className="text-xs text-slate-400 uppercase tracking-wide">Type</label>
                 {itemTypes.length > 0 ? (
                   <select value={form.item_type} onChange={set('item_type')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                    <option value="">Seleccionar...</option>
+                    <option value="">Select...</option>
                     {itemTypes.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 ) : (
@@ -254,33 +314,33 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                     type="text"
                     value={form.item_type}
                     onChange={set('item_type')}
-                    placeholder="Ej: Virtual, Physical..."
+                    placeholder="e.g. Virtual, Physical..."
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors"
                   />
                 )}
               </div>
             </div>
 
-            <Field label="Nombre del sistema *" value={form.name} onChange={set('name')} placeholder="Ej: DC-01, FortiGate 100F..." />
+            <Field label="System name *" value={form.name} onChange={set('name')} placeholder="e.g. DC-01, FortiGate 100F..." />
 
             {!isLicense && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Dominio / Versión" value={form.domain_version} onChange={set('domain_version')} placeholder="domain.com / 10.0" />
-                <Field label="Uso / Roles" value={form.role_use} onChange={set('role_use')} placeholder="PDC / ADP / DNS..." />
+                <Field label="Domain / Version" value={form.domain_version} onChange={set('domain_version')} placeholder="domain.com / 10.0" />
+                <Field label="Usage / Roles" value={form.role_use} onChange={set('role_use')} placeholder="PDC / ADP / DNS..." />
               </div>
             )}
 
             {!isLicense && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="IP / Identificador" value={form.ip} onChange={set('ip')} placeholder="XXX.XXX.XXX.XXX" mono />
-                <Field label="Serial / Licencia" value={form.serial} onChange={set('serial')} placeholder="XXXX-XXXX-XXXX" mono />
+                <Field label="IP / Identifier" value={form.ip} onChange={set('ip')} placeholder="XXX.XXX.XXX.XXX" mono />
+                <Field label="Serial / License" value={form.serial} onChange={set('serial')} placeholder="XXXX-XXXX-XXXX" mono />
               </div>
             )}
 
             {!isLicense && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Email de contacto" value={form.email} onChange={set('email')} placeholder="admin@empresa.com" type="email" />
-                <Field label="Fecha de expiración" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
+                <Field label="Contact email" value={form.email} onChange={set('email')} placeholder="admin@empresa.com" type="email" />
+                <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
               </div>
             )}
 
@@ -290,17 +350,17 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                   <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 uppercase tracking-wide">Status</label>
                     <select value={form.status} onChange={set('status')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                      <option value="">Seleccionar...</option>
+                      <option value="">Select...</option>
                       <option value="OK">OK</option>
-                      <option value="Próximo">Próximo</option>
-                      <option value="Vencido">Vencido</option>
-                      <option value="Sin fecha">Sin fecha</option>
+                      <option value="Expiring">Expiring</option>
+                      <option value="Expired">Expired</option>
+                      <option value="No date">No date</option>
                     </select>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 uppercase tracking-wide">Process</label>
                     <select value={form.process} onChange={set('process')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                      <option value="">Seleccionar...</option>
+                      <option value="">Select...</option>
                       <option value="RFQ or Notification received">RFQ or Notification received</option>
                       <option value="Waiting for PQ">Waiting for PQ</option>
                       <option value="Pending review">Pending review</option>
@@ -315,12 +375,12 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 uppercase tracking-wide">Notas</label>
+                  <label className="text-xs text-slate-400 uppercase tracking-wide">Notes</label>
                   <textarea
                     value={form.notes}
                     onChange={set('notes')}
                     rows={2}
-                    placeholder="Información adicional..."
+                    placeholder="Additional info..."
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors resize-none"
                   />
                 </div>
@@ -337,7 +397,7 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                 >
                   <div className="flex items-center gap-2">
                     <RefreshCw size={16} className={renewalStyle.icon} />
-                    <span className={`text-sm font-medium ${renewalStyle.label}`}>Renovación de licencia</span>
+                    <span className={`text-sm font-medium ${renewalStyle.label}`}>License renewal</span>
                   </div>
                   <ChevronDown
                     size={16}
@@ -348,25 +408,25 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                 {showRenewal && (
                   <div className="mt-4 space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <Field label="Serial / Licencia" value={form.serial} onChange={set('serial')} placeholder="XXXX-XXXX-XXXX" mono />
-                      <Field label="Fecha de expiración" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
+                      <Field label="Serial / License" value={form.serial} onChange={set('serial')} placeholder="XXXX-XXXX-XXXX" mono />
+                      <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <label className="text-xs text-slate-400 uppercase tracking-wide">Status</label>
                         <select value={form.status} onChange={set('status')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                          <option value="">Seleccionar...</option>
+                          <option value="">Select...</option>
                           <option value="OK">OK</option>
-                          <option value="Próximo">Próximo</option>
-                          <option value="Vencido">Vencido</option>
-                          <option value="Sin fecha">Sin fecha</option>
+                          <option value="Expiring">Expiring</option>
+                          <option value="Expired">Expired</option>
+                          <option value="No date">No date</option>
                         </select>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs text-slate-400 uppercase tracking-wide">Process</label>
                         <select value={form.process} onChange={set('process')} className={SELECT_CLASS} style={SELECT_STYLE}>
-                          <option value="">Seleccionar...</option>
+                          <option value="">Select...</option>
                           <option value="RFQ or Notification received">RFQ or Notification received</option>
                           <option value="Waiting for PQ">Waiting for PQ</option>
                           <option value="Pending review">Pending review</option>
@@ -381,12 +441,12 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs text-slate-400 uppercase tracking-wide">Notas</label>
+                      <label className="text-xs text-slate-400 uppercase tracking-wide">Notes</label>
                       <textarea
                         value={form.notes}
                         onChange={set('notes')}
                         rows={2}
-                        placeholder="Información adicional sobre la licencia..."
+                        placeholder="Additional info about the license..."
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors resize-none"
                       />
                     </div>
@@ -404,7 +464,7 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
               >
                 <div className="flex items-center gap-2">
                   <Lock size={16} className="text-yellow-400" />
-                  <span className="text-sm font-medium text-yellow-300">Credenciales de acceso</span>
+                  <span className="text-sm font-medium text-yellow-300">Access credentials</span>
                 </div>
                 <ChevronDown
                   size={16}
@@ -416,30 +476,30 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
                 <div className="mt-4 space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-xs text-slate-400 uppercase tracking-wide">Usuario principal</label>
+                      <label className="text-xs text-slate-400 uppercase tracking-wide">Main user</label>
                       <input type="text" value={form.cred_user} onChange={set('cred_user')} placeholder="admin@empresa.com"
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-yellow-500 outline-none transition-colors" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs text-slate-400 uppercase tracking-wide">Contraseña principal</label>
+                      <label className="text-xs text-slate-400 uppercase tracking-wide">Main password</label>
                       <input type="password" value={form.cred_password} onChange={set('cred_password')} placeholder="••••••••"
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-yellow-500 outline-none transition-colors" />
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-xs text-slate-400 uppercase tracking-wide">Usuario alternativo</label>
+                      <label className="text-xs text-slate-400 uppercase tracking-wide">Alt. user</label>
                       <input type="text" value={form.cred_user_alt} onChange={set('cred_user_alt')} placeholder="support@empresa.com"
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-yellow-500 outline-none transition-colors" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs text-slate-400 uppercase tracking-wide">Contraseña alternativa</label>
+                      <label className="text-xs text-slate-400 uppercase tracking-wide">Alt. password</label>
                       <input type="password" value={form.cred_password_alt} onChange={set('cred_password_alt')} placeholder="••••••••"
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-yellow-500 outline-none transition-colors" />
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs text-slate-400 uppercase tracking-wide">Notas de credenciales</label>
+                    <label className="text-xs text-slate-400 uppercase tracking-wide">Notes de credenciales</label>
                     <input type="text" value={form.cred_notes} onChange={set('cred_notes')} placeholder="Ej: MFA habilitado, cambiar cada 90 días..."
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-yellow-500 outline-none transition-colors" />
                   </div>
@@ -450,15 +510,15 @@ export default function ItemModal({ item, clients, categories, onClose, onSaved 
 
           <div className="flex gap-2 justify-end p-5 border-t border-slate-800 flex-shrink-0">
             <button type="button" onClick={onClose} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition-all">
-              Cancelar
+              Cancel
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || loadingCredentials}
               className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-5 py-2 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
             >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {item ? 'Guardar cambios' : 'Crear registro'}
+              {saving || loadingCredentials ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {loadingCredentials ? 'Loading credentials…' : item ? 'Save changes' : 'Create record'}
             </button>
           </div>
         </form>

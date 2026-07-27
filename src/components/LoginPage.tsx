@@ -177,7 +177,7 @@ export default function LoginPage() {
 
               <div className="relative flex justify-center text-sm">
                 <span className="px-3 bg-[#050d18] text-white/60">
-                  o
+                  or
                 </span>
               </div>
             </div>

@@ -27,11 +27,7 @@ export type CmdbItem = {
   expiration_date: string | null
   notes: string
   sort_order: number
-  cred_user: string
-  cred_password: string
-  cred_user_alt: string
-  cred_password_alt: string
-  cred_notes: string
+  has_credentials: boolean
   status: string
   process: string
   process_updated_at: string | null
@@ -56,23 +52,30 @@ export type UserRole = {
   created_at: string
 }
 
-export type ItemStatus = 'OK' | 'Próximo' | 'Vencido' | 'Sin fecha'
+export type ItemStatus = 'OK' | 'Expiring' | 'Expired' | 'No date'
+
+function getCalendarDayDifference(expirationDate: string): number {
+  const [year, month, day] = expirationDate.split('-').map(Number)
+  if (!year || !month || !day) return Number.NaN
+  const now = new Date()
+  const expirationDay = Date.UTC(year, month - 1, day)
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  return Math.round((expirationDay - today) / (1000 * 60 * 60 * 24))
+}
 
 export function getItemStatus(expiration_date: string | null): ItemStatus {
-  if (!expiration_date) return 'Sin fecha'
-  const exp = new Date(expiration_date)
-  const now = new Date()
-  const diffDays = Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  if (diffDays < 0) return 'Vencido'
-  if (diffDays <= 30) return 'Próximo'
+  if (!expiration_date) return 'No date'
+  const diffDays = getCalendarDayDifference(expiration_date)
+  if (Number.isNaN(diffDays)) return 'No date'
+  if (diffDays < 0) return 'Expired'
+  if (diffDays <= 30) return 'Expiring'
   return 'OK'
 }
 
 export function getDaysUntilExpiration(expiration_date: string | null): number | null {
   if (!expiration_date) return null
-  const exp = new Date(expiration_date)
-  const now = new Date()
-  return Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  const diffDays = getCalendarDayDifference(expiration_date)
+  return Number.isNaN(diffDays) ? null : diffDays
 }
 
 export type ClientSummary = {
@@ -87,8 +90,8 @@ export function computeClientSummary(items: CmdbItem[]): ClientSummary {
   return {
     services: items.length,
     licenses: items.filter(i => licenseCategories.includes(i.category)).length,
-    expiring: items.filter(i => getItemStatus(i.expiration_date) === 'Próximo').length,
-    critical: items.filter(i => getItemStatus(i.expiration_date) === 'Vencido').length,
+    expiring: items.filter(i => getItemStatus(i.expiration_date) === 'Expiring').length,
+    critical: items.filter(i => getItemStatus(i.expiration_date) === 'Expired').length,
   }
 }
 
@@ -115,17 +118,39 @@ export type Credentials = {
 }
 
 export function hasCredentials(item: CmdbItem): boolean {
-  return !!(item.cred_user || item.cred_password || item.cred_user_alt || item.cred_password_alt)
+  return item.has_credentials === true
 }
 
-export function getCredentials(item: CmdbItem): Credentials {
+export async function revealCredentials(itemId: string): Promise<Credentials> {
+  const { data, error } = await supabase.rpc('reveal_cmdb_credentials', { p_item_id: itemId }).maybeSingle()
+  if (error) throw error
+  const credentials = data as {
+    username?: string
+    password?: string
+    alternative_username?: string
+    alternative_password?: string
+    notes?: string
+  } | null
+
   return {
-    user: item.cred_user || '',
-    password: item.cred_password || '',
-    user_alt: item.cred_user_alt || '',
-    password_alt: item.cred_password_alt || '',
-    notes: item.cred_notes || '',
+    user: credentials?.username ?? '',
+    password: credentials?.password ?? '',
+    user_alt: credentials?.alternative_username ?? '',
+    password_alt: credentials?.alternative_password ?? '',
+    notes: credentials?.notes ?? '',
   }
+}
+
+export async function saveCredentials(itemId: string, credentials: Credentials): Promise<void> {
+  const { error } = await supabase.rpc('save_cmdb_credentials', {
+    p_item_id: itemId,
+    p_username: credentials.user,
+    p_password: credentials.password,
+    p_alternative_username: credentials.user_alt,
+    p_alternative_password: credentials.password_alt,
+    p_notes: credentials.notes,
+  })
+  if (error) throw error
 }
 
 export function groupItemsByCategory(items: CmdbItem[]): SectionData[] {

@@ -1,18 +1,19 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import logoImg from '../assets/logo1.png'
 import {
-  ChevronDown, ChevronRight, Search, Plus, RefreshCw, X, Filter,
+  ChevronDown, ChevronRight, Search, Plus, RefreshCw, X,
   Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
   AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
-  Eye, EyeOff, Copy, Lock, LogOut, StickyNote, History, Copy as CopyIcon, Users
+  Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users
 } from 'lucide-react'
 import {
-  supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration, ItemHistory, UserRole,
-  computeClientSummary, groupItemsByCategory, ClientSummary, SectionData,
-  hasCredentials, getCredentials, Credentials
+  supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
+  ClientSummary, SectionData,
+  hasCredentials, revealCredentials, Credentials
 } from '../lib/supabase'
 import ItemModal from './ItemModal'
+import { useCmdbData } from '../hooks/useCmdbData'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'Servers': <Server size={18} />,
@@ -35,15 +36,21 @@ type ClientWithItems = CmdbClient & {
 }
 
 function StatusPill({ status }: { status: string }) {
+  const label: Record<string, string> = {
+    'OK': 'OK',
+    'Expiring': 'Expiring',
+    'Expired': 'Expired',
+    'No date': 'No date',
+  }
   const styles: Record<string, string> = {
     'OK': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    'Próximo': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    'Vencido': 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    'Sin fecha': 'bg-slate-700 text-slate-300 border-slate-600',
+    'Expiring': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    'Expired': 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+    'No date': 'bg-slate-700 text-slate-300 border-slate-600',
   }
   return (
-    <span className={`rounded-full border px-3 py-1 text-xs font-medium ${styles[status] || styles['Sin fecha']}`}>
-      {status}
+    <span className={`rounded-full border px-3 py-1 text-xs font-medium ${styles[status] || styles['No date']}`}>
+      {label[status] || status}
     </span>
   )
 }
@@ -71,7 +78,7 @@ function CredentialField({ label, value }: { label: string; value: string }) {
             onClick={() => setShow(!show)}
             disabled={!value}
             className="rounded-lg bg-slate-800 p-2 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            title={show ? 'Ocultar' : 'Mostrar'}
+            title={show ? 'Hide' : 'Show'}
           >
             {show ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
@@ -81,7 +88,7 @@ function CredentialField({ label, value }: { label: string; value: string }) {
             className={`rounded-lg p-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
               copied ? 'bg-emerald-600/30 text-emerald-300' : 'bg-slate-800 hover:bg-slate-700'
             }`}
-            title={copied ? 'Copiado' : 'Copiar'}
+            title={copied ? 'Copied' : 'Copy'}
           >
             <Copy size={14} />
           </button>
@@ -91,26 +98,39 @@ function CredentialField({ label, value }: { label: string; value: string }) {
   )
 }
 
-function CredentialsPanel({ credentials }: { credentials: Credentials }) {
-  const hasAny = credentials.user || credentials.password || credentials.user_alt || credentials.password_alt
+function SecureCredentialsPanel({ itemId }: { itemId: string }) {
+  const [credentials, setCredentials] = useState<Credentials | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  if (!hasAny) return null
+  useEffect(() => {
+    let active = true
+    revealCredentials(itemId)
+      .then(data => {
+        if (active) setCredentials(data)
+      })
+      .catch(fetchError => {
+        if (active) setError(fetchError instanceof Error ? fetchError.message : 'Could not reveal credentials')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [itemId])
+
+  if (loading) return <p className="text-xs text-slate-500">Loading credentials…</p>
+  if (error) return <p className="text-xs text-rose-400">{error}</p>
+  if (!credentials) return null
 
   return (
-    <div className="border-t border-slate-800 p-4 bg-slate-950/50">
-      <div className="mb-4 flex items-center gap-2">
-        <Lock size={16} className="text-yellow-400" />
-        <h4 className="font-semibold text-yellow-300">Credenciales</h4>
-        {credentials.notes && (
-          <span className="text-xs text-slate-500 ml-auto">{credentials.notes}</span>
-        )}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <CredentialField label="Usuario principal" value={credentials.user} />
-        <CredentialField label="Contraseña principal" value={credentials.password} />
-        <CredentialField label="Usuario alternativo" value={credentials.user_alt} />
-        <CredentialField label="Contraseña alternativa" value={credentials.password_alt} />
-      </div>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <CredentialField label="User" value={credentials.user} />
+      <CredentialField label="Password" value={credentials.password} />
+      <CredentialField label="User alt." value={credentials.user_alt} />
+      <CredentialField label="Password alt." value={credentials.password_alt} />
     </div>
   )
 }
@@ -129,8 +149,8 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
-  const hasExpiring = section.rows.some(r => r.status === 'Próximo' || r.status === 'Vencido')
-  const hasCreds = section.rows.some(r => hasCredentials(r.item))
+  const hasExpiring = section.rows.some(r => r.status === 'Expiring' || r.status === 'Expired')
+  const hasCreds = isAdmin && section.rows.some(r => hasCredentials(r.item))
 
   const sortedRows = [...section.rows].sort((a, b) => {
     switch (sortBy) {
@@ -175,8 +195,8 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
           <div className="text-left">
             <h3 className="text-[15px] font-semibold text-white tracking-tight">{section.title}</h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              {section.rows.length} registros
-              {hasCreds && ` · ${section.rows.filter(r => hasCredentials(r.item)).length} con credenciales`}
+              {section.rows.length} records
+              {hasCreds && ` · ${section.rows.filter(r => hasCredentials(r.item)).length} with credentials`}
             </p>
           </div>
         </div>
@@ -185,7 +205,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
           {hasExpiring && (
             <span className="hidden sm:flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-[11px] font-medium text-amber-300">
               <AlertTriangle size={11} />
-              Revisar expiraciones
+              Check expirations
             </span>
           )}
           {open ? <ChevronDown size={18} className="text-slate-500" /> : <ChevronRight size={18} className="text-slate-500" />}
@@ -197,17 +217,17 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
 
           <div className="flex items-center justify-between px-5 py-2.5 bg-slate-950/30">
             <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">
-              Detalle de registros
+              Detalle de records
             </p>
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value as typeof sortBy)}
               className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-2.5 py-1 text-[11px] text-slate-400 outline-none cursor-pointer hover:border-slate-600 transition-colors"
             >
-              <option value="name-asc">Nombre A-Z</option>
-              <option value="name-desc">Nombre Z-A</option>
-              <option value="type-asc">Tipo A-Z</option>
-              <option value="type-desc">Tipo Z-A</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+              <option value="type-asc">Type A-Z</option>
+              <option value="type-desc">Type Z-A</option>
             </select>
           </div>
 
@@ -216,19 +236,19 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
               <thead>
                 <tr className="border-b border-slate-800/60 text-[10px] uppercase tracking-wider text-slate-500">
                   <th className="px-5 py-2.5 text-left font-medium w-10"></th>
-                  <th className="px-3 py-2.5 text-left font-medium">Tipo</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Nombre</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Dominio / Versión</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Uso / Roles</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Type</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Name</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Domain / Version</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Usage / Roles</th>
                   <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">IP / ID</th>
-                  <th className="px-3 py-2.5 text-left font-medium w-28">Estado</th>
-                  <th className="px-5 py-2.5 text-right font-medium w-32">Acciones</th>
+                  <th className="px-3 py-2.5 text-left font-medium w-28">Status</th>
+                  <th className="px-5 py-2.5 text-right font-medium w-32">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedRows.map((row, idx) => {
                   const isExpanded = expandedRows.has(row.id)
-                  const creds = hasCredentials(row.item)
+                  const creds = isAdmin && hasCredentials(row.item)
                   const isHighlighted = highlightedItemId === row.id
 
                   return (
@@ -236,9 +256,9 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                       <tr
                         id={'item-' + row.id}
                         key={row.id}
-                        className={`border-b border-slate-800/40 transition-all duration-300 ${
+                        className={`border-b border-slate-800/40 transition-all duration-500 ${
                           isHighlighted
-                            ? 'bg-cyan-500/5'
+                            ? 'bg-cyan-500/15 border-l-2 border-l-cyan-400/60 glow-row'
                             : idx % 2 === 0 ? 'bg-transparent' : 'bg-slate-900/20'
                         } hover:bg-slate-800/30`}
                       >
@@ -292,7 +312,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                             <button
                               onClick={() => onHistory(row.item)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-all"
-                              title="Historial"
+                              title="History"
                             >
                               <History size={13} />
                             </button>
@@ -301,21 +321,21 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                                 <button
                                   onClick={() => onDuplicate(row.item)}
                                   className="p-1.5 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all"
-                                  title="Duplicar"
+                                  title="Duplicate"
                                 >
                                   <CopyIcon size={13} />
                                 </button>
                                 <button
                                   onClick={() => onEdit(row.item)}
                                   className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-blue-500/20 transition-all"
-                                  title="Editar"
+                                  title="Edit"
                                 >
                                   <Pencil size={13} />
                                 </button>
                                 <button
                                   onClick={() => onDelete(row.id)}
                                   className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                                  title="Eliminar"
+                                  title="Delete"
                                 >
                                   <Trash2 size={13} />
                                 </button>
@@ -331,14 +351,9 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                             <div className="bg-slate-950/40 border-t border-slate-800/30 px-5 py-4">
                               <div className="flex items-center gap-2 mb-3">
                                 <Lock size={13} className="text-yellow-400/80" />
-                                <h4 className="text-[11px] font-semibold text-yellow-300/90 uppercase tracking-wider">Credenciales</h4>
+                                <h4 className="text-[11px] font-semibold text-yellow-300/90 uppercase tracking-wider">Credentials</h4>
                               </div>
-                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                <CredentialField label="Usuario" value={getCredentials(row.item).user} />
-                                <CredentialField label="Contraseña" value={getCredentials(row.item).password} />
-                                <CredentialField label="Usuario alt." value={getCredentials(row.item).user_alt} />
-                                <CredentialField label="Contraseña alt." value={getCredentials(row.item).password_alt} />
-                              </div>
+                              <SecureCredentialsPanel itemId={row.item.id} />
                             </div>
                           </td>
                         </tr>
@@ -353,7 +368,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
           {sortedRows.length === 0 && (
             <div className="text-center py-8 text-slate-500 text-sm">
               <Server size={24} className="mx-auto mb-2 opacity-30" />
-              No hay registros en esta sección
+              No hay records en esta sección
             </div>
           )}
         </div>
@@ -364,7 +379,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
 
 function isProcessStale(item: CmdbItem, staleDays = 5): boolean {
   const status = getItemStatus(item.expiration_date)
-  if (status === 'OK' || status === 'Sin fecha') return false
+  if (status === 'OK' || status === 'No date') return false
   if (!item.process || item.process === '') return false
   if (!item.process_updated_at) return false
   const updated = new Date(item.process_updated_at)
@@ -375,87 +390,51 @@ function isProcessStale(item: CmdbItem, staleDays = 5): boolean {
 
 export default function DashboardCMDB() {
   const { user, signOut } = useAuth()
-  const [clients, setClients] = useState<ClientWithItems[]>([])
-  const [allItems, setAllItems] = useState<CmdbItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const {
+    clients,
+    allItems,
+    loading,
+    userRole,
+    history,
+    loadingHistory,
+    allRoles,
+    fetchData,
+    handleDelete: deleteItem,
+    handleDeleteClient: deleteClient,
+    handleEditClient: updateClient,
+    fetchHistory: loadHistory,
+    fetchRoles: loadRoles,
+    saveRole: upsertRole,
+    deleteRole: removeRole,
+  } = useCmdbData(user)
   const [search, setSearch] = useState('')
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<Set<string>>(new Set())
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
-  const [selectedStatus, setSelectedStatus] = useState('Todos')
-  const [statsModal, setStatsModal] = useState<null | 'clients' | 'total' | 'expiring' | 'critical'>(null)
+  const [statsModal, setStatsModal] = useState<null | 'clients' | 'total' | 'expiring' | 'critical' | 'alerts'>(null)
   const [modalSearch, setModalSearch] = useState('')
   const [alertThreshold, setAlertThreshold] = useState<number>(365)
-  const [showAlertConfig, setShowAlertConfig] = useState(false)
   const [alertsExpanded, setAlertsExpanded] = useState(true)
-  const [alertStatus, setAlertStatus] = useState('Todos')
-  const [categoryFilter, setCategoryFilter] = useState<string>('Todos')
-  const [clientNotes, setClientNotes] = useState<string>('')
-  const [savingNotes, setSavingNotes] = useState(false)
-  const [showNotes, setShowNotes] = useState(false)
+  const [alertStatus, setAlertStatus] = useState('All')
+  const [categoryFilter, setCategoryFilter] = useState<string>('All')
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
-  const [history, setHistory] = useState<ItemHistory[]>([])
-  const [loadingHistory, setLoadingHistory] = useState(false)
-  const [userRole, setUserRole] = useState<'admin' | 'viewer'>('viewer')
   const [rolesModal, setRolesModal] = useState(false)
-  const [allRoles, setAllRoles] = useState<UserRole[]>([])
   const [newRoleEmail, setNewRoleEmail] = useState('')
   const [newRoleValue, setNewRoleValue] = useState<'admin' | 'viewer'>('viewer')
+  const [roleError, setRoleError] = useState('')
+  const [savingRoleEmail, setSavingRoleEmail] = useState<string | null>(null)
+  const [pendingRoleAction, setPendingRoleAction] = useState<
+    | { type: 'change'; email: string; role: 'admin' | 'viewer' }
+    | { type: 'delete'; email: string }
+    | null
+  >(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editItem, setEditItem] = useState<CmdbItem | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientName, setEditClientName] = useState('')
   const [savingClient, setSavingClient] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    const [{ data: clientData }, { data: itemData }] = await Promise.all([
-      supabase.from('cmdb_clients').select('*').order('name'),
-      supabase.from('cmdb_items').select('*, cmdb_clients(id, name)').order('created_at', { ascending: false }),
-    ])
-
-    const processedClients: ClientWithItems[] = (clientData ?? []).map(client => {
-      const clientItems = (itemData ?? [])
-        .filter((i: CmdbItem & { cmdb_clients?: CmdbClient }) => i.client_id === client.id)
-        .map((i: CmdbItem) => ({ ...i, expiration_date: i.expiration_date || null }))
-      return {
-        ...client,
-        items: clientItems,
-        summary: computeClientSummary(clientItems),
-        sections: groupItemsByCategory(clientItems),
-      }
-    })
-
-    setClients(processedClients)
-    const normalizedItems = (itemData ?? []).map((i: CmdbItem) => ({
-      ...i,
-      expiration_date: i.expiration_date || null,
-    }))
-    setAllItems(normalizedItems)
-    setLoading(false)
-  }, [])
-const hasFetchedRef = useRef(false)
-
-useEffect(() => {
-  if (hasFetchedRef.current) return
-  hasFetchedRef.current = true
-  
-  fetchData()
-}, [fetchData])
-
-// Separar la carga del rol del usuario
-useEffect(() => {
-  if (!user?.email) return
-  
-  supabase.from('cmdb_user_roles').select('*').eq('user_email', user.email).single()
-    .then(({ data }) => {
-      if (data) setUserRole(data.role as 'admin' | 'viewer')
-      else setUserRole('admin')
-    })
-}, [user])
-
 
   useEffect(() => {
     if (clients.length > 0 && !selectedClientId) {
@@ -466,29 +445,41 @@ useEffect(() => {
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q || q.length < 2) return []
-    return allItems
-      .filter(i =>
-        i.name?.toLowerCase().includes(q) ||
-        i.ip?.toLowerCase().includes(q) ||
-        i.serial?.toLowerCase().includes(q) ||
-        i.domain_version?.toLowerCase().includes(q)
-      )
-      .slice(0, 10)
-      .map(i => ({
-        item: i,
-        client: clients.find(c => c.id === i.client_id),
-      }))
+    const matchingClients = clients.filter(c => c.name.toLowerCase().includes(q))
+    const matchingItems = allItems.filter(i =>
+      i.name?.toLowerCase().includes(q) ||
+      i.ip?.toLowerCase().includes(q) ||
+      i.serial?.toLowerCase().includes(q) ||
+      i.domain_version?.toLowerCase().includes(q)
+    )
+    const results: Array<{ item: CmdbItem; client: CmdbClient | undefined }> = []
+    // Add matching clients as client entries (use first item as anchor)
+    for (const c of matchingClients) {
+      const firstItem = allItems.find(i => i.client_id === c.id)
+      if (firstItem) {
+        results.push({ item: firstItem, client: c })
+      } else {
+        results.push({ item: { id: c.id, name: c.name + ' (client)' } as CmdbItem, client: c })
+      }
+    }
+    // Add matching items
+    for (const i of matchingItems) {
+      if (!results.some(r => r.item.id === i.id)) {
+        results.push({ item: i, client: clients.find(c => c.id === i.client_id) })
+      }
+    }
+    return results.slice(0, 10)
   }, [search, allItems, clients])
 
   const allCategories = useMemo(() => {
     const cats = new Set(allItems.map(i => i.category).filter(Boolean))
-    return ['Todos', ...Array.from(cats).sort()]
+    return ['All', ...Array.from(cats).sort()]
   }, [allItems])
 
   const filteredClients = useMemo(() => {
     const q = search.trim().toLowerCase()
     return clients.filter(c => {
-      if (categoryFilter !== 'Todos') {
+      if (categoryFilter !== 'All') {
         const hasCategory = c.items.some(i => i.category === categoryFilter)
         if (!hasCategory) return false
       }
@@ -503,13 +494,6 @@ useEffect(() => {
       )
     })
   }, [clients, search, categoryFilter])
-
-  useEffect(() => {
-    if (!selectedClientId) { setClientNotes(''); return }
-    const client = clients.find(c => c.id === selectedClientId)
-    setClientNotes(client?.notes ?? '')
-    setShowNotes(false)
-  }, [selectedClientId, clients])
 
   const navigateToItem = (item: CmdbItem) => {
     setSearch('')
@@ -528,63 +512,107 @@ useEffect(() => {
     }, 300)
   }
 
-  const saveClientNotes = async () => {
-    if (!selectedClientId) return
-    setSavingNotes(true)
-    await supabase.from('cmdb_clients').update({ notes: clientNotes }).eq('id', selectedClientId)
-    setSavingNotes(false)
-  }
-
   const duplicateItem = async (item: CmdbItem) => {
-    const { id, created_at, updated_at, ...rest } = item
-    await supabase.from('cmdb_items').insert({
+    const rest: Partial<CmdbItem> = { ...item }
+    delete rest.id
+    delete rest.created_at
+    delete rest.updated_at
+    delete rest.cmdb_clients
+    const { data, error } = await supabase.from('cmdb_items').insert({
       ...rest,
       name: rest.name + ' (copia)',
+      has_credentials: false,
       updated_at: new Date().toISOString(),
-    })
+    }).select('id')
+    if (error) {
+      console.error('Error duplicando item:', error)
+      return
+    }
+    // Navigate to the same client, open section, highlight new item
+    setSelectedClientId(item.client_id)
+    if (item.category) {
+      setOpenSections(prev => new Set([...prev, item.category]))
+    }
     fetchData()
+    if (data && data[0]) {
+      const newId = data[0].id
+      setHighlightedItemId(newId)
+      setTimeout(() => {
+        const el = document.getElementById('item-' + newId)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 500)
+      setTimeout(() => setHighlightedItemId(null), 4000)
+    }
   }
 
   const fetchHistory = async (item: CmdbItem) => {
     setHistoryItem(item)
-    setLoadingHistory(true)
-    const { data } = await supabase
-      .from('cmdb_item_history')
-      .select('*')
-      .eq('item_id', item.id)
-      .order('changed_at', { ascending: false })
-      .limit(20)
-    setHistory(data ?? [])
-    setLoadingHistory(false)
+    await loadHistory(item)
   }
 
   const fetchRoles = async () => {
-    const { data } = await supabase.from('cmdb_user_roles').select('*').order('created_at')
-    setAllRoles(data as UserRole[] ?? [])
+    await loadRoles()
     setRolesModal(true)
   }
 
   const saveRole = async () => {
     if (!newRoleEmail.trim()) return
-    await supabase.from('cmdb_user_roles').upsert({ user_email: newRoleEmail.trim(), role: newRoleValue }, { onConflict: 'user_email' })
-    setNewRoleEmail('')
-    fetchRoles()
+    setRoleError('')
+    setSavingRoleEmail(newRoleEmail.trim())
+    try {
+      await upsertRole(newRoleEmail.trim(), newRoleValue)
+      setNewRoleEmail('')
+    } catch (error) {
+      setRoleError(error instanceof Error ? error.message : 'Could not save the role')
+    } finally {
+      setSavingRoleEmail(null)
+    }
   }
 
   const deleteRole = async (email: string) => {
-    await supabase.from('cmdb_user_roles').delete().eq('user_email', email)
-    fetchRoles()
+    setRoleError('')
+    setSavingRoleEmail(email)
+    try {
+      await removeRole(email)
+    } catch (error) {
+      setRoleError(error instanceof Error ? error.message : 'Could not delete the role')
+    } finally {
+      setSavingRoleEmail(null)
+    }
+  }
+
+  const changeRole = async (email: string, role: 'admin' | 'viewer') => {
+    setRoleError('')
+    setSavingRoleEmail(email)
+    try {
+      await upsertRole(email, role)
+    } catch (error) {
+      setRoleError(error instanceof Error ? error.message : 'Could not change the role')
+    } finally {
+      setSavingRoleEmail(null)
+    }
+  }
+
+  const confirmRoleAction = async () => {
+    if (!pendingRoleAction) return
+    const action = pendingRoleAction
+    setPendingRoleAction(null)
+    if (action.type === 'change') {
+      await changeRole(action.email, action.role)
+    } else {
+      await deleteRole(action.email)
+    }
   }
 
   const currentClient = useMemo(() => {
     return clients.find(c => c.id === selectedClientId) || null
-  }, [clients, selectedClientId, filteredClients])
+  }, [clients, selectedClientId])
 
   const globalStats = useMemo(() => ({
     clients: clients.length,
     total: allItems.length,
-    expiring: allItems.filter(i => getItemStatus(i.expiration_date) === 'Próximo').length,
-    critical: allItems.filter(i => getItemStatus(i.expiration_date) === 'Vencido').length,
+    expiring: allItems.filter(i => getItemStatus(i.expiration_date) === 'Expiring').length,
+    critical: allItems.filter(i => getItemStatus(i.expiration_date) === 'Expired').length,
     withCredentials: allItems.filter(i => hasCredentials(i)).length,
   }), [clients, allItems])
 
@@ -595,27 +623,26 @@ useEffect(() => {
         const days = getDaysUntilExpiration(i.expiration_date)
         const status = getItemStatus(i.expiration_date)
         if (days !== null && days > alertThreshold) return false
-        if (alertStatus === 'Todos') return true
+        if (alertStatus === 'All') return true
         return status === alertStatus
       })
       .sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
-      .slice(0, 12)
   }, [allItems, alertStatus, alertThreshold])
 
 
   const statsModalItems = useMemo(() => {
     switch (statsModal) {
       case 'total': return [...allItems].sort((a, b) => a.name.localeCompare(b.name))
-      case 'expiring': return allItems.filter(i => getItemStatus(i.expiration_date) === 'Próximo').sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
-      case 'critical': return allItems.filter(i => getItemStatus(i.expiration_date) === 'Vencido').sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
+      case 'expiring': return allItems.filter(i => getItemStatus(i.expiration_date) === 'Expiring').sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
+      case 'critical': return allItems.filter(i => getItemStatus(i.expiration_date) === 'Expired').sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
+      case 'alerts': return expiringItems
       default: return []
     }
-  }, [statsModal, allItems])
+  }, [statsModal, allItems, expiringItems])
 
   const handleDelete = async (id: string) => {
-    await supabase.from('cmdb_items').delete().eq('id', id)
+    await deleteItem(id)
     setDeleteConfirm(null)
-    fetchData()
   }
 
   const handleEditClient = (client: ClientWithItems) => {
@@ -626,40 +653,22 @@ useEffect(() => {
   const handleSaveClientName = async () => {
     if (!editClientId || !editClientName.trim()) return
     setSavingClient(true)
-    await supabase.from('cmdb_clients').update({ name: editClientName.trim() }).eq('id', editClientId)
+    await updateClient(editClientId, editClientName.trim())
     setSavingClient(false)
     setEditClientId(null)
     setEditClientName('')
-    fetchData()
   }
 
   const handleDeleteClient = async (clientId: string) => {
-    await supabase.from('cmdb_clients').delete().eq('id', clientId)
+    await deleteClient(clientId)
     setDeleteConfirm(null)
     if (selectedClientId === clientId) {
       setSelectedClientId(null)
     }
-    fetchData()
-  }
-
-  const handleExport = () => {
-    const clientItems = currentClient?.items ?? []
-    const rows = [
-      ['Cliente', 'Categoría', 'Tipo', 'Nombre', 'Dominio/Versión', 'Uso/Roles', 'IP', 'Serial', 'Email', 'Expiración', 'Estado', 'Usuario', 'Contraseña', 'Usuario Alt', 'Contraseña Alt', 'Notas'],
-      ...clientItems.map(i => [
-        currentClient?.name ?? '', i.category, i.item_type, i.name, i.domain_version, i.role_use,
-        i.ip, i.serial, i.email, i.expiration_date ?? '', getItemStatus(i.expiration_date),
-        i.cred_user, i.cred_password, i.cred_user_alt, i.cred_password_alt, i.notes
-      ])
-    ]
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    a.download = `cmdb-${currentClient?.name ?? 'export'}.csv`
-    a.click()
   }
 
   const categories = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort()
+  const adminRoleCount = allRoles.filter(role => role.role === 'admin').length
 
   return (
     <div className="min-h-screen bg-[#050d18] text-white font-sans">
@@ -670,13 +679,13 @@ useEffect(() => {
             <img src={logoImg} alt="JoSYS" className="h-8 md:h-10 w-auto object-contain brightness-125" />
           </div>
           <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 flex-col items-center">
-            <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Dashboard de Servicios</span>
+            <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Services Dashboard</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={fetchData}
               className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
-              title="Actualizar"
+              title="Refresh"
             >
               <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             </button>
@@ -685,7 +694,7 @@ useEffect(() => {
                 <button
                   onClick={fetchRoles}
                   className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
-                  title="Gestionar roles"
+                  title="Manage roles"
                 >
                   <Users size={14} />
                   <span className="hidden md:inline">Roles</span>
@@ -694,17 +703,17 @@ useEffect(() => {
                   onClick={() => { setEditItem(null); setModalOpen(true) }}
                   className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 px-4 py-2.5 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
                 >
-                  <Plus size={14} /> Nuevo registro
+                  <Plus size={14} /> New record
                 </button>
               </>
             )}
             <button
               onClick={() => signOut()}
-              title={user?.email ?? 'Cerrar sesión'}
+              title={user?.email ?? 'Sign out'}
               className="flex items-center gap-2 bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 px-3 py-2.5 rounded-xl text-sm transition-all"
             >
               <LogOut size={14} />
-              <span className="hidden md:inline">Cerrar sesión</span>
+              <span className="hidden md:inline">Sign out</span>
             </button>
           </div>
         </div>
@@ -728,7 +737,7 @@ useEffect(() => {
                     }
                     if (e.key === 'Escape') { setSearch(''); setShowSearchDropdown(false) }
                   }}
-                  placeholder="Buscar cliente, IP, sistema..."
+                  placeholder="Search client, IP, system..."
                   className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
                 />
                 {search && (
@@ -760,11 +769,11 @@ useEffect(() => {
             {/* Stats */}
             <div className="grid grid-cols-2 gap-3">
               <button onClick={() => { setStatsModal('clients'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
-                <p className="text-xs text-slate-400">Clientes</p>
+                <p className="text-xs text-slate-400">Clients</p>
                 <p className="mt-1 text-2xl font-bold">{globalStats.clients}</p>
               </button>
               <button onClick={() => { setStatsModal('total'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
-                <p className="text-xs text-slate-400">Items Totales</p>
+                <p className="text-xs text-slate-400">Total Items</p>
                 <p className="mt-1 text-2xl font-bold">{globalStats.total}</p>
               </button>
 
@@ -772,7 +781,7 @@ useEffect(() => {
 
             {/* Category Filter */}
             <div className="space-y-1.5">
-              <label className="text-xs text-slate-500 uppercase tracking-wide px-1">Filtrar por categoría</label>
+              <label className="text-xs text-slate-500 uppercase tracking-wide px-1">Filter by category</label>
               <select
                 value={categoryFilter}
                 onChange={e => setCategoryFilter(e.target.value)}
@@ -784,7 +793,7 @@ useEffect(() => {
 
             {/* Client List */}
             <div className="space-y-2">
-              <p className="px-1 text-xs uppercase tracking-[0.25em] text-slate-500">Clientes</p>
+              <p className="px-1 text-xs uppercase tracking-[0.25em] text-slate-500">Clients</p>
               <div className="max-h-[700px] overflow-y-auto space-y-2 pr-1">
                 {loading ? (
                   Array.from({ length: 3 }).map((_, i) => (
@@ -794,7 +803,7 @@ useEffect(() => {
                     </div>
                   ))
                 ) : filteredClients.length === 0 ? (
-                  <p className="text-slate-500 text-sm text-center py-8">No se encontraron clientes</p>
+                  <p className="text-slate-500 text-sm text-center py-8">No clients found</p>
                 ) : (
                   filteredClients.map(client => (
                     <div
@@ -812,7 +821,7 @@ useEffect(() => {
                         >
                           <div className="min-w-0">
                             <p className="font-semibold text-white truncate">{client.name}</p>
-                            <p className="mt-1 text-xs text-slate-400">{client.sections.length} secciones</p>
+                            <p className="mt-1 text-xs text-slate-400">{client.sections.length} sections</p>
                           </div>
                         </button>
                         <div className="flex items-start gap-1.5">
@@ -822,7 +831,7 @@ useEffect(() => {
                             </span>
                             {(client.summary.expiring > 0 || client.summary.critical > 0) && (
                               <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-300">
-                                {client.summary.expiring + client.summary.critical} alertas
+                                {client.summary.expiring + client.summary.critical} alerts
                               </span>
                             )}
                           </div>
@@ -830,14 +839,14 @@ useEffect(() => {
                             <button
                               onClick={(e) => { e.stopPropagation(); handleEditClient(client) }}
                               className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all"
-                              title="Editar cliente"
+                              title="Edit cliente"
                             >
                               <Pencil size={12} />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); setDeleteConfirm(`client:${client.id}`) }}
                               className="p-1.5 rounded-lg hover:bg-red-600/80 text-slate-400 hover:text-white transition-all"
-                              title="Eliminar cliente"
+                              title="Delete cliente"
                             >
                               <Trash2 size={12} />
                             </button>
@@ -855,7 +864,7 @@ useEffect(() => {
           <main className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
             {/* Expiration alerts - always visible */}
      
-            {expiringItems.length > 0 && (
+            {!loading && (
   <div className="rounded-2xl border border-amber-500/15 bg-[#0a1220] overflow-hidden">
     {/* ===== HEADER RETRAÍBLE ===== */}
     <button
@@ -867,14 +876,14 @@ useEffect(() => {
           <Calendar size={16} className="text-amber-400" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-amber-200">Alertas de expiración</h3>
-          <p className="text-xs text-amber-400/60">{expiringItems.length} items requieren atención</p>
+          <h3 className="text-sm font-semibold text-amber-200">Expiration alerts</h3>
+          <p className="text-xs text-amber-400/60">{expiringItems.length} items need attention</p>
         </div>
       </div>
       <div className="flex items-center gap-2">
         {expiringItems.length > 5 && alertsExpanded && (
           <span className="text-xs text-amber-400/50 bg-amber-500/10 px-2.5 py-0.5 rounded-full">
-            mostrando 5 de {expiringItems.length}
+            showing 5 of {expiringItems.length}
           </span>
         )}
         <ChevronDown
@@ -889,7 +898,7 @@ useEffect(() => {
       <>
         {/* Barra de configuración compacta */}
         <div className="border-b border-amber-500/10 bg-slate-950/30 px-5 py-3 flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-slate-500 uppercase tracking-wider flex-shrink-0">Umbral:</span>
+          <span className="text-xs text-slate-500 uppercase tracking-wider flex-shrink-0">Threshold:</span>
           <div className="flex gap-1.5">
             {[30, 60, 90, 180, 365].map(d => (
               <button
@@ -908,7 +917,7 @@ useEffect(() => {
           <div className="w-px h-4 bg-slate-700/50 mx-1" />
           <span className="text-xs text-slate-500 uppercase tracking-wider flex-shrink-0">Status:</span>
           <div className="flex gap-1.5">
-            {['Todos', 'Vencido', 'Próximo'].map(x => (
+            {['All', 'Expired', 'Expiring'].map(x => (
               <button
                 key={x}
                 onClick={() => setAlertStatus(x)}
@@ -926,6 +935,13 @@ useEffect(() => {
 
         {/* ===== LISTA COMPACTA (máx 5 items) ===== */}
         <div className="divide-y divide-slate-800/40">
+          {expiringItems.length === 0 && (
+            <div className="px-5 py-8 text-center">
+              <CheckCircle size={24} className="mx-auto mb-2 text-emerald-400" />
+              <p className="text-sm text-slate-300">No alerts match these filters</p>
+              <p className="mt-1 text-xs text-slate-500">Change the threshold or status to see other expirations.</p>
+            </div>
+          )}
           {expiringItems.slice(0, 5).map(item => {
             const status = getItemStatus(item.expiration_date)
             const days = getDaysUntilExpiration(item.expiration_date)
@@ -935,16 +951,16 @@ useEffect(() => {
             return (
               <div
                 key={item.id}
-                onClick={() => { setEditItem(item); setModalOpen(true) }}
+                onClick={() => navigateToItem(item)}
                 className={`flex items-center gap-3 px-5 py-3 cursor-pointer transition-colors group ${
-                  status === 'Vencido'
+                  status === 'Expired'
                     ? 'hover:bg-rose-500/[0.04]'
                     : 'hover:bg-amber-500/[0.04]'
                 }`}
               >
                 {/* Barra de severidad */}
                 <div className={`w-[3px] h-6 rounded-full flex-shrink-0 ${
-                  status === 'Vencido' ? 'bg-rose-500' : 'bg-amber-500'
+                  status === 'Expired' ? 'bg-rose-500' : 'bg-amber-500'
                 }`} />
 
                 {/* Info */}
@@ -957,19 +973,19 @@ useEffect(() => {
                     {isStale && (
                       <>
                         <span className="text-slate-700 text-xs">·</span>
-                        <span className="text-xs text-orange-400/80">Sin seguimiento +5d</span>
+                        <span className="text-xs text-orange-400/80">No follow-up +5d</span>
                       </>
                     )}
                   </div>
                 </div>
 
-                {/* Días / Estado */}
+                {/* Días / Status */}
                 <div className="flex items-center gap-2.5 flex-shrink-0">
                   <span className="text-xs text-slate-500 font-mono hidden sm:inline">{item.expiration_date}</span>
                   <span className={`text-sm font-bold tabular-nums ${
-                    status === 'Vencido' ? 'text-rose-400' : 'text-amber-300'
+                    status === 'Expired' ? 'text-rose-400' : 'text-amber-300'
                   }`}>
-                    {status === 'Vencido' ? 'Vencido' : `${days}d`}
+                    {status === 'Expired' ? 'Expired' : `${days}d`}
                   </span>
                   <ChevronRight size={14} className="text-slate-600 group-hover:text-slate-400 transition-colors" />
                 </div>
@@ -981,10 +997,10 @@ useEffect(() => {
         {/* ===== "VER MÁS" si hay más de 5 ===== */}
         {expiringItems.length > 5 && (
           <button
-            onClick={() => { setStatsModal('expiring'); setModalSearch('') }}
+            onClick={() => { setStatsModal('alerts'); setModalSearch('') }}
             className="w-full flex items-center justify-center gap-2 py-3 text-sm text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/[0.04] transition-all border-t border-amber-500/10"
           >
-            Ver las {expiringItems.length} alertas
+            View all {expiringItems.length} alerts
             <ChevronRight size={14} />
           </button>
         )}
@@ -1010,26 +1026,26 @@ useEffect(() => {
             ) : !currentClient ? (
               <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-12 text-center">
                 <Monitor size={48} className="mx-auto mb-4 text-slate-600" />
-                <p className="text-slate-400">Selecciona un cliente para ver sus servicios</p>
+                <p className="text-slate-400">Select a client to view their services</p>
               </div>
             ) : (
               <>
                 {/* Client stats */}
                 <div className="grid gap-3 md:grid-cols-4">
                   <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-700">
-                    <p className="text-xs text-slate-400">Servicios</p>
+                    <p className="text-xs text-slate-400">Services</p>
                     <p className="mt-2 text-2xl font-bold">{currentClient.summary.services}</p>
                   </div>
                   <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-700">
-                    <p className="text-xs text-slate-400">Licencias</p>
+                    <p className="text-xs text-slate-400">Licenses</p>
                     <p className="mt-2 text-2xl font-bold">{currentClient.summary.licenses}</p>
                   </div>
                   <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
-                    <p className="text-xs text-amber-200">Próximos a vencer</p>
+                    <p className="text-xs text-amber-200">Expiring soon</p>
                     <p className="mt-2 text-2xl font-bold text-amber-200">{currentClient.summary.expiring}</p>
                   </div>
                   <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4">
-                    <p className="text-xs text-rose-200">Críticos</p>
+                    <p className="text-xs text-rose-200">Critical</p>
                     <p className="mt-2 text-2xl font-bold text-rose-200">{currentClient.summary.critical}</p>
                   </div>
                 </div>
@@ -1040,13 +1056,13 @@ useEffect(() => {
                   <div className="mb-6 flex items-center justify-between">
                     <div>
                       <h2 className="text-3xl font-bold">{currentClient.name}</h2>
-                      <p className="mt-1 text-slate-400">Vista completa de servicios y accesos del cliente</p>
+                      <p className="mt-1 text-slate-400">Full view of client services and access</p>
                     </div>
-                    <StatusPill status={currentClient.summary.critical > 0 ? 'Vencido' : currentClient.summary.expiring > 0 ? 'Próximo' : 'OK'} />
+                    <StatusPill status={currentClient.summary.critical > 0 ? 'Expired' : currentClient.summary.expiring > 0 ? 'Expiring' : 'OK'} />
                   </div>
 
                   <div className="space-y-5">
-                    {currentClient.sections.map((section, idx) => (
+                    {currentClient.sections.map(section => (
                       <SectionCard
                         key={selectedClientId + '-' + section.title}
                         section={section}
@@ -1062,12 +1078,12 @@ useEffect(() => {
                     {currentClient.sections.length === 0 && (
                       <div className="text-center py-12 text-slate-500">
                         <Server size={32} className="mx-auto mb-3 opacity-30" />
-                        <p>Este cliente no tiene registros</p>
+                        <p>Este cliente no tiene records</p>
                         <button
                           onClick={() => { setEditItem(null); setModalOpen(true) }}
                           className="mt-3 inline-flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm"
                         >
-                          <Plus size={14} /> Agregar primer registro
+                          <Plus size={14} /> Add first record
                         </button>
                       </div>
                     )}
@@ -1096,16 +1112,16 @@ useEffect(() => {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 text-rose-400">
               <AlertTriangle size={24} />
-              <h3 className="font-semibold text-lg">Confirmar eliminación</h3>
+              <h3 className="font-semibold text-lg">Confirm deletion</h3>
             </div>
             <p className="text-slate-400 text-sm">
               {deleteConfirm.startsWith('client:')
-                ? 'Al eliminar el cliente también se eliminarán todos sus registros asociados. Esta acción no se puede deshacer.'
-                : 'Esta acción no se puede deshacer. El registro será eliminado permanentemente.'}
+                ? 'Al eliminar el cliente también se eliminarán todos sus records asociados. Esta acción no se puede deshacer.'
+                : 'This action cannot be undone. The record will be permanently deleted.'}
             </p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteConfirm(null)} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition-all">
-                Cancelar
+                Cancel
               </button>
               <button
                 onClick={() => {
@@ -1117,7 +1133,7 @@ useEffect(() => {
                 }}
                 className="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-xl text-sm transition-all"
               >
-                Eliminar
+                Delete
               </button>
             </div>
           </div>
@@ -1130,17 +1146,17 @@ useEffect(() => {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 text-cyan-400">
               <Pencil size={24} />
-              <h3 className="font-semibold text-lg">Editar nombre del cliente</h3>
+              <h3 className="font-semibold text-lg">Edit client name</h3>
             </div>
             <div className="space-y-2">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">Nombre del cliente</label>
+              <label className="text-xs text-slate-400 uppercase tracking-wide">Client name</label>
               <input
                 type="text"
                 value={editClientName}
                 onChange={e => setEditClientName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleSaveClientName() }}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-cyan-500 outline-none transition-colors"
-                placeholder="Nombre del cliente"
+                placeholder="Client name"
                 autoFocus
               />
             </div>
@@ -1149,7 +1165,7 @@ useEffect(() => {
                 onClick={() => { setEditClientId(null); setEditClientName('') }}
                 className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition-all"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 onClick={handleSaveClientName}
@@ -1157,7 +1173,7 @@ useEffect(() => {
                 className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-2 rounded-xl text-sm transition-all"
               >
                 {savingClient ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                Guardar
+                Save
               </button>
             </div>
           </div>
@@ -1172,7 +1188,7 @@ useEffect(() => {
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <History size={16} className="text-cyan-400" />
-                <h3 className="font-semibold">Historial — {historyItem.name}</h3>
+                <h3 className="font-semibold">History — {historyItem.name}</h3>
               </div>
               <button onClick={() => setHistoryItem(null)} className="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800"><X size={18} /></button>
             </div>
@@ -1180,7 +1196,7 @@ useEffect(() => {
               {loadingHistory ? (
                 <div className="flex justify-center py-8"><RefreshCw size={20} className="animate-spin text-slate-400" /></div>
               ) : history.length === 0 ? (
-                <p className="text-center text-slate-500 text-sm py-8">Sin historial de cambios aún</p>
+                <p className="text-center text-slate-500 text-sm py-8">No change history yet</p>
               ) : (
                 history.map(h => (
                   <div key={h.id} className="rounded-xl border border-slate-800 bg-slate-800/50 p-3 space-y-2">
@@ -1211,7 +1227,7 @@ useEffect(() => {
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Users size={16} className="text-cyan-400" />
-                <h3 className="font-semibold">Gestión de roles</h3>
+                <h3 className="font-semibold">Role Management</h3>
               </div>
               <button onClick={() => setRolesModal(false)} className="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800"><X size={18} /></button>
             </div>
@@ -1232,29 +1248,99 @@ useEffect(() => {
                   <option value="admin">Admin</option>
                   <option value="viewer">Viewer</option>
                 </select>
-                <button onClick={saveRole} className="bg-cyan-600 hover:bg-cyan-500 px-3 py-2 rounded-xl text-sm transition-all whitespace-nowrap">
-                  + Agregar
+                <button
+                  onClick={saveRole}
+                  disabled={!newRoleEmail.trim() || savingRoleEmail !== null}
+                  className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-xl text-sm transition-all whitespace-nowrap"
+                >
+                  {savingRoleEmail === newRoleEmail.trim() ? 'Saving…' : '+ Agregar'}
                 </button>
               </div>
+              {roleError && (
+                <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                  {roleError}
+                </p>
+              )}
               {allRoles.length === 0 ? (
-                <p className="text-center text-slate-500 text-sm py-6">No hay roles configurados</p>
+                <p className="text-center text-slate-500 text-sm py-6">No roles configured</p>
               ) : (
                 allRoles.map(r => (
                   <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3">
-                    <div className="space-y-0.5">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium">{r.user_email}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${r.role === 'admin' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-700 text-slate-400'}`}>{r.role}</span>
                     </div>
-                    {r.user_email !== user?.email && (
-                      <button onClick={() => deleteRole(r.user_email)} className="text-slate-500 hover:text-rose-400 transition-colors text-xs px-2 py-1 rounded-lg hover:bg-rose-500/10">
-                        Eliminar
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={r.role}
+                        onChange={event => setPendingRoleAction({
+                          type: 'change',
+                          email: r.user_email,
+                          role: event.target.value as 'admin' | 'viewer',
+                        })}
+                        disabled={savingRoleEmail !== null}
+                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none disabled:opacity-50"
+                        aria-label={`Role for ${r.user_email}`}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="viewer" disabled={r.role === 'admin' && adminRoleCount === 1}>
+                          Viewer
+                        </option>
+                      </select>
+                      {r.user_email !== user?.email && (
+                      <button
+                        onClick={() => setPendingRoleAction({ type: 'delete', email: r.user_email })}
+                        disabled={savingRoleEmail !== null || (r.role === 'admin' && adminRoleCount === 1)}
+                        title={r.role === 'admin' && adminRoleCount === 1 ? 'At least one admin is required' : 'Delete role'}
+                        className="text-slate-500 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs px-2 py-1 rounded-lg hover:bg-rose-500/10"
+                      >
+                        Delete
                       </button>
-                    )}
+                      )}
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
+          {pendingRoleAction && (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+              onClick={() => setPendingRoleAction(null)}
+            >
+              <div
+                className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
+                onClick={event => event.stopPropagation()}
+              >
+                <h4 className="text-lg font-semibold text-white">Confirm role change</h4>
+                <p className="mt-2 text-sm text-slate-400">
+                  {pendingRoleAction.type === 'change'
+                    ? `Change ${pendingRoleAction.email} to ${pendingRoleAction.role}?`
+                    : `Delete the assigned role for ${pendingRoleAction.email}?`}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  This action changes the user's CMDB permissions immediately.
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    onClick={() => setPendingRoleAction(null)}
+                    className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmRoleAction}
+                    className={`rounded-xl px-4 py-2 text-sm text-white transition-colors ${
+                      pendingRoleAction.type === 'delete'
+                        ? 'bg-rose-600 hover:bg-rose-500'
+                        : 'bg-cyan-600 hover:bg-cyan-500'
+                    }`}
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {/* Stats Detail Modal */}
@@ -1263,10 +1349,11 @@ useEffect(() => {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <h3 className="font-semibold text-lg">
-                {statsModal === 'clients' && `Clientes (${globalStats.clients})`}
-                {statsModal === 'total' && `Todos los items (${globalStats.total})`}
-                {statsModal === 'expiring' && `Próximos a vencer (${globalStats.expiring})`}
-                {statsModal === 'critical' && `Críticos / Vencidos (${globalStats.critical})`}
+                {statsModal === 'clients' && `Clients (${globalStats.clients})`}
+                {statsModal === 'total' && `All los items (${globalStats.total})`}
+                {statsModal === 'expiring' && `Expiring soon (${globalStats.expiring})`}
+                {statsModal === 'critical' && `Critical / Expireds (${globalStats.critical})`}
+                {statsModal === 'alerts' && `Expiration alerts (${expiringItems.length})`}
               </h3>
               <button onClick={() => { setStatsModal(null); setModalSearch('') }} className="text-slate-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800">
                 <X size={18} />
@@ -1296,8 +1383,8 @@ useEffect(() => {
               {statsModal === 'clients' ? (
                 (clients as ClientWithItems[]).filter(c => !modalSearch || c.name.toLowerCase().includes(modalSearch.toLowerCase())).map(c => {
                   const cItems = allItems.filter(i => i.client_id === c.id)
-                  const expiring = cItems.filter(i => getItemStatus(i.expiration_date) === 'Próximo').length
-                  const critical = cItems.filter(i => getItemStatus(i.expiration_date) === 'Vencido').length
+                  const expiring = cItems.filter(i => getItemStatus(i.expiration_date) === 'Expiring').length
+                  const critical = cItems.filter(i => getItemStatus(i.expiration_date) === 'Expired').length
                   return (
                     <button key={c.id} onClick={() => { setSelectedClientId(c.id); setStatsModal(null); setModalSearch('') }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
                       <div>
@@ -1318,7 +1405,7 @@ useEffect(() => {
                   const days = getDaysUntilExpiration(item.expiration_date)
                   const status = getItemStatus(item.expiration_date)
                   return (
-                    <button key={item.id} onClick={() => { setSelectedClientId(item.client_id ?? null); setStatsModal(null); setModalSearch('') }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
+                    <button key={item.id} onClick={() => { setStatsModal(null); setModalSearch(''); navigateToItem(item) }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium truncate">{item.name}</p>
                         <p className="text-xs text-slate-400">{clientName} · {item.category}</p>
@@ -1326,7 +1413,7 @@ useEffect(() => {
                       <div className="flex items-center gap-3 ml-3 flex-shrink-0">
                         {item.expiration_date && days !== null && (
                           <span className="text-xs text-slate-400">
-                            {days < 0 ? `Vencido hace ${Math.abs(days)}d` : `${days}d`}
+                            {days < 0 ? `Expired hace ${Math.abs(days)}d` : `${days}d`}
                           </span>
                         )}
                         <StatusPill status={status} />
@@ -1338,7 +1425,7 @@ useEffect(() => {
               {statsModal !== 'clients' && statsModalItems.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-500">
                   <CheckCircle size={32} className="mb-2 text-emerald-500" />
-                  <p className="text-sm">No hay items en esta categoría</p>
+                  <p className="text-sm">No items in this category</p>
                 </div>
               )}
             </div>
