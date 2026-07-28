@@ -2,8 +2,19 @@ import { createContext, useContext, useEffect, useState, useRef, useCallback, ty
 import { supabase } from '../lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
 
-const INACTIVITY_TIMEOUT = 5 * 60 * 1000 // 15 minutes in ms
-const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click']
+const INACTIVITY_TIMEOUT = 15 * 60 * 1000
+const ACTIVITY_THROTTLE = 1000
+const ACTIVITY_EVENTS = [
+  'pointermove',
+  'pointerdown',
+  'keydown',
+  'input',
+  'change',
+  'touchstart',
+  'wheel',
+  'scroll',
+] as const
+const ACTIVITY_LISTENER_OPTIONS: AddEventListenerOptions = { capture: true, passive: true }
 
 interface AuthContextType {
   user: User | null
@@ -22,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTimerResetRef = useRef(0)
   const userRef = useRef<User | null>(null)
 
   const signOut = useCallback(async () => {
@@ -29,11 +41,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const resetTimer = useCallback(() => {
+    lastTimerResetRef.current = Date.now()
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       signOut()
     }, INACTIVITY_TIMEOUT)
   }, [signOut])
+
+  const handleActivity = useCallback(() => {
+    if (Date.now() - lastTimerResetRef.current < ACTIVITY_THROTTLE) return
+    resetTimer()
+  }, [resetTimer])
 
   // Start/stop inactivity timer based on session
   useEffect(() => {
@@ -44,7 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Start timer and attach activity listeners
     resetTimer()
-    ACTIVITY_EVENTS.forEach(e => window.addEventListener(e, resetTimer, { passive: true }))
+    ACTIVITY_EVENTS.forEach(eventName => {
+      window.addEventListener(eventName, handleActivity, ACTIVITY_LISTENER_OPTIONS)
+    })
 
     // ⬇️ NUEVO: Reiniciar timer al volver a la pestaña
     const handleVisibility = () => {
@@ -56,10 +76,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
-      ACTIVITY_EVENTS.forEach(e => window.removeEventListener(e, resetTimer))
+      ACTIVITY_EVENTS.forEach(eventName => {
+        window.removeEventListener(eventName, handleActivity, { capture: true })
+      })
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [user, resetTimer])
+  }, [user, resetTimer, handleActivity])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

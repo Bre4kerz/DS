@@ -29,11 +29,13 @@ type QualityIssue = {
   message: string
 }
 
-const jsonResponse = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
+const jsonResponse = (body: unknown, status = 200) => {
+  console.log('[cmdb-expiration-alerts]', JSON.stringify({ status, result: body }))
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
 
 function calendarDaysUntil(date: string): number {
   const [year, month, day] = date.split('-').map(Number)
@@ -70,29 +72,53 @@ function validateLicense(item: LicenseItem): QualityIssue[] {
 function renderEmail(alerts: Array<LicenseItem & { days: number }>, issues: QualityIssue[]) {
   const alertRows = alerts.map(item => `
     <tr>
-      <td>${item.cmdb_clients?.name ?? '—'}</td><td>${item.name}</td><td>${item.vendor || '—'}</td>
-      <td>${item.branch || '—'}</td><td>${item.qty}</td><td>${item.expiration_date}</td>
+      <td>${item.cmdb_clients?.name ?? '&mdash;'}</td><td>${item.name}</td><td>${item.vendor || '&mdash;'}</td>
+      <td>${item.branch || '&mdash;'}</td><td>${item.qty}</td><td>${item.expiration_date}</td>
       <td style="font-weight:600;color:${item.days < 0 ? '#e11d48' : '#d97706'}">
-        ${item.days < 0 ? `Expired ${Math.abs(item.days)}d ago` : `${item.days}d`}
+        ${item.days < 0 ? `Venci&oacute; hace ${Math.abs(item.days)} d&iacute;as` : `${item.days} d&iacute;as`}
       </td>
     </tr>`).join('')
-  const issueRows = issues.map(issue => `
-    <li><strong>${issue.severity.toUpperCase()}</strong> — ${issue.message}</li>`).join('')
+  const issueSummary = new Map<string, {
+    severity: QualityIssue['severity']
+    message: string
+    count: number
+  }>()
+  for (const issue of issues) {
+    const key = `${issue.severity}:${issue.issue_code}`
+    const current = issueSummary.get(key)
+    if (current) current.count += 1
+    else issueSummary.set(key, { severity: issue.severity, message: issue.message, count: 1 })
+  }
+  const issueRows = [...issueSummary.values()]
+    .sort((a, b) => b.count - a.count)
+    .map(issue => `
+    <li><strong>${issue.severity.toUpperCase()}</strong> &mdash; ${issue.message}
+    <strong>(${issue.count} registros)</strong></li>`).join('')
 
   return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#0f172a">
-    <h2>CMDB expiration report</h2>
-    <p>${alerts.length} license(s) require attention.</p>
+    <h2>Reporte de vencimiento de licencias</h2>
+    <p>${alerts.length} licencia(s) requieren atenci&oacute;n.</p>
     <table cellpadding="8" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:13px">
-      <thead><tr style="background:#e2e8f0"><th>Client</th><th>License</th><th>Vendor</th>
-      <th>Branch</th><th>QTY</th><th>Expiration</th><th>Status</th></tr></thead>
+      <thead><tr style="background:#e2e8f0"><th>Cliente</th><th>Licencia</th><th>Proveedor</th>
+      <th>Sucursal</th><th>Cantidad</th><th>Vencimiento</th><th>Estado</th></tr></thead>
       <tbody>${alertRows}</tbody>
     </table>
-    ${issues.length ? `<h3>Incomplete records</h3><ul>${issueRows}</ul>` : ''}
-    <p style="margin-top:24px;color:#64748b;font-size:12px">Generated automatically by CMDB.</p>
+    ${issues.length ? `
+      <h3>Resumen de registros incompletos</h3>
+      <p>Se detectaron ${issues.length} campos que requieren revisi&oacute;n:</p>
+      <ul>${issueRows}</ul>
+      <p style="color:#64748b;font-size:12px">
+        Consulta &ldquo;Data Quality Issues&rdquo; en el dashboard para ver y corregir cada registro.
+      </p>` : ''}
+    <p style="margin-top:24px;color:#64748b;font-size:12px">Generado autom&aacute;ticamente por CMDB.</p>
   </body></html>`
 }
 
 Deno.serve(async request => {
+  console.log('[cmdb-expiration-alerts] Invocation received', {
+    method: request.method,
+    timestamp: new Date().toISOString(),
+  })
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405)
   const cronSecret = Deno.env.get('CRON_SECRET')
   if (!cronSecret || request.headers.get('x-cron-secret') !== cronSecret) {
@@ -129,23 +155,32 @@ Deno.serve(async request => {
   const { data: openIssues } = await supabase
     .from('cmdb_data_quality_issues').select('id,item_id,issue_code').is('resolved_at', null)
   const detectedKeys = new Set(detectedIssues.map(issue => `${issue.item_id}:${issue.issue_code}`))
+  const openIssueMap = new Map(
+    (openIssues ?? []).map(issue => [`${issue.item_id}:${issue.issue_code}`, issue]),
+  )
+  const nowIso = new Date().toISOString()
+  const resolvedIssueIds = (openIssues ?? [])
+    .filter(issue => !detectedKeys.has(`${issue.item_id}:${issue.issue_code}`))
+    .map(issue => issue.id)
+  const existingIssueIds = detectedIssues
+    .map(issue => openIssueMap.get(`${issue.item_id}:${issue.issue_code}`)?.id)
+    .filter((id): id is string => Boolean(id))
+  const newIssues = detectedIssues.filter(
+    issue => !openIssueMap.has(`${issue.item_id}:${issue.issue_code}`),
+  )
 
-  for (const issue of openIssues ?? []) {
-    if (!detectedKeys.has(`${issue.item_id}:${issue.issue_code}`)) {
-      await supabase.from('cmdb_data_quality_issues')
-        .update({ resolved_at: new Date().toISOString(), resolution: 'Automatically resolved after record correction' })
-        .eq('id', issue.id)
-    }
+  if (resolvedIssueIds.length > 0) {
+    await supabase.from('cmdb_data_quality_issues')
+      .update({ resolved_at: nowIso, resolution: 'Automatically resolved after record correction' })
+      .in('id', resolvedIssueIds)
   }
-  for (const issue of detectedIssues) {
-    const existing = (openIssues ?? []).find(row => row.item_id === issue.item_id && row.issue_code === issue.issue_code)
-    if (existing) {
-      await supabase.from('cmdb_data_quality_issues')
-        .update({ last_detected_at: new Date().toISOString(), severity: issue.severity, message: issue.message })
-        .eq('id', existing.id)
-    } else {
-      await supabase.from('cmdb_data_quality_issues').insert(issue)
-    }
+  if (existingIssueIds.length > 0) {
+    await supabase.from('cmdb_data_quality_issues')
+      .update({ last_detected_at: nowIso })
+      .in('id', existingIssueIds)
+  }
+  if (newIssues.length > 0) {
+    await supabase.from('cmdb_data_quality_issues').insert(newIssues)
   }
 
   const alerts = items
@@ -157,16 +192,27 @@ Deno.serve(async request => {
     }))
     .filter(item => item.threshold !== undefined)
 
+  const { data: previousNotifications } = alerts.length > 0
+    ? await supabase
+      .from('cmdb_expiration_notifications')
+      .select('item_id,expiration_date,threshold_days,recipient,status')
+      .in('item_id', alerts.map(alert => alert.id))
+      .in('recipient', settings.recipients)
+    : { data: [] }
+  const sentNotificationKeys = new Set(
+    (previousNotifications ?? [])
+      .filter(notification => notification.status === 'sent')
+      .map(notification =>
+        `${notification.item_id}:${notification.expiration_date}:${notification.threshold_days}:${notification.recipient}`,
+      ),
+  )
+
   let sent = 0
   let failed = 0
   for (const recipient of settings.recipients) {
-    const pending = []
-    for (const alert of alerts) {
-      const { data: existing } = await supabase.from('cmdb_expiration_notifications')
-        .select('id').eq('item_id', alert.id).eq('expiration_date', alert.expiration_date!)
-        .eq('threshold_days', alert.threshold!).eq('recipient', recipient).eq('status', 'sent').maybeSingle()
-      if (!existing) pending.push(alert)
-    }
+    const pending = alerts.filter(alert => !sentNotificationKeys.has(
+      `${alert.id}:${alert.expiration_date}:${alert.threshold}:${recipient}`,
+    ))
     if (pending.length === 0 && detectedIssues.length === 0) continue
 
     const response = await fetch('https://api.resend.com/emails', {
@@ -175,14 +221,14 @@ Deno.serve(async request => {
       body: JSON.stringify({
         from: settings.from_email,
         to: [recipient],
-        subject: `CMDB: ${pending.length} expiration alert(s), ${detectedIssues.length} data issue(s)`,
+        subject: `CMDB: ${pending.length} alerta(s) de vencimiento y ${detectedIssues.length} dato(s) por revisar`,
         html: renderEmail(pending, detectedIssues),
       }),
     })
     const responseBody = await response.json().catch(() => ({})) as { id?: string; message?: string }
 
-    for (const alert of pending) {
-      await supabase.from('cmdb_expiration_notifications').upsert({
+    if (pending.length > 0) {
+      await supabase.from('cmdb_expiration_notifications').upsert(pending.map(alert => ({
         item_id: alert.id,
         expiration_date: alert.expiration_date,
         threshold_days: alert.threshold,
@@ -191,7 +237,7 @@ Deno.serve(async request => {
         provider_message_id: responseBody.id ?? null,
         error: response.ok ? null : responseBody.message ?? `HTTP ${response.status}`,
         sent_at: new Date().toISOString(),
-      }, { onConflict: 'item_id,expiration_date,threshold_days,recipient' })
+      })), { onConflict: 'item_id,expiration_date,threshold_days,recipient' })
     }
     if (response.ok) sent += pending.length
     else failed += pending.length
