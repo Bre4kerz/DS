@@ -23,7 +23,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>
   signInWithMicrosoft: () => Promise<{ error: Error | null }>
-  signOut: () => Promise<void>
+  signOut: (reason?: 'manual' | 'inactivity') => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -36,7 +36,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastTimerResetRef = useRef(0)
   const userRef = useRef<User | null>(null)
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (reason: 'manual' | 'inactivity' = 'manual') => {
+    if (userRef.current) {
+      await supabase.rpc('log_cmdb_auth_event', {
+        p_action: reason === 'inactivity' ? 'inactivity_logout' : 'logout',
+        p_metadata: { source: 'dashboard' },
+      })
+    }
     await supabase.auth.signOut()
   }, [])
 
@@ -44,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lastTimerResetRef.current = Date.now()
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
-      signOut()
+      signOut('inactivity')
     }, INACTIVITY_TIMEOUT)
   }, [signOut])
 
@@ -84,10 +90,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, resetTimer, handleActivity])
 
   useEffect(() => {
+    const logSessionStart = async (activeSession: Session) => {
+      const sessionMarker = `cmdb-login-audited:${activeSession.user.id}:${activeSession.expires_at ?? 'session'}`
+      if (sessionStorage.getItem(sessionMarker)) return
+      const { error } = await supabase.rpc('log_cmdb_auth_event', {
+        p_action: 'login',
+        p_metadata: {
+          source: 'dashboard',
+          provider: activeSession.user.app_metadata.provider ?? 'email',
+        },
+      })
+      if (!error) sessionStorage.setItem(sessionMarker, 'true')
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setUser(session?.user ?? null)
       userRef.current = session?.user ?? null
+      if (session) void logSessionStart(session)
       setLoading(false)
     })
 
@@ -106,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       userRef.current = newUser
       setSession(session)
       setUser(newUser)
+      if (event === 'SIGNED_IN' && session) void logSessionStart(session)
     })
 
     return () => subscription.unsubscribe()

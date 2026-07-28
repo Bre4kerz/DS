@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronRight, Search, Plus, RefreshCw, X,
   Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
   AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
-  Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users
+  Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList
 } from 'lucide-react'
 import {
   supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
@@ -139,6 +139,21 @@ type QualityIssue = {
   message: string
   last_detected_at: string
   resolved_at: string | null
+}
+
+type AuditLog = {
+  id: number
+  occurred_at: string
+  actor_email: string | null
+  event_type: 'authentication' | 'data_change' | 'security'
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  entity_name: string | null
+  summary: string
+  old_data: Record<string, unknown> | null
+  new_data: Record<string, unknown> | null
+  metadata: Record<string, unknown>
 }
 
 function CopyableIp({ value }: { value: string }) {
@@ -528,6 +543,13 @@ export default function DashboardCMDB() {
   const [categoryFilter, setCategoryFilter] = useState<string>(restoredNavigation?.categoryFilter ?? 'All')
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
   const [rolesModal, setRolesModal] = useState(false)
+  const [auditLogsModal, setAuditLogsModal] = useState(false)
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false)
+  const [auditLogsError, setAuditLogsError] = useState('')
+  const [auditSearch, setAuditSearch] = useState('')
+  const [auditEventFilter, setAuditEventFilter] = useState('all')
+  const [expandedAuditLogId, setExpandedAuditLogId] = useState<number | null>(null)
   const [alertSettingsModal, setAlertSettingsModal] = useState(false)
   const [qualityIssuesModal, setQualityIssuesModal] = useState(false)
   const [qualityIssues, setQualityIssues] = useState<QualityIssue[]>([])
@@ -699,6 +721,25 @@ export default function DashboardCMDB() {
     setRolesModal(true)
   }
 
+  const fetchAuditLogs = async () => {
+    setAuditLogsModal(true)
+    setLoadingAuditLogs(true)
+    setAuditLogsError('')
+    const { data, error } = await supabase
+      .from('cmdb_audit_logs')
+      .select('*')
+      .order('occurred_at', { ascending: false })
+      .limit(500)
+    if (error) {
+      console.error('Could not load audit logs:', error)
+      setAuditLogsError(error.message)
+      setAuditLogs([])
+    } else {
+      setAuditLogs((data ?? []) as AuditLog[])
+    }
+    setLoadingAuditLogs(false)
+  }
+
   const fetchQualityIssues = async (openModal = false) => {
     const { data } = await supabase
       .from('cmdb_data_quality_issues')
@@ -806,6 +847,21 @@ export default function DashboardCMDB() {
   const currentClient = useMemo(() => {
     return clients.find(c => c.id === selectedClientId) || null
   }, [clients, selectedClientId])
+
+  const filteredAuditLogs = useMemo(() => {
+    const query = auditSearch.trim().toLowerCase()
+    return auditLogs.filter(log => {
+      if (auditEventFilter !== 'all' && log.event_type !== auditEventFilter) return false
+      if (!query) return true
+      return [
+        log.actor_email,
+        log.action,
+        log.entity_type,
+        log.entity_name,
+        log.summary,
+      ].some(value => value?.toLowerCase().includes(query))
+    })
+  }, [auditLogs, auditSearch, auditEventFilter])
 
   const globalStats = useMemo(() => ({
     clients: clients.length,
@@ -936,6 +992,14 @@ export default function DashboardCMDB() {
                 >
                   <Users size={14} />
                   <span className="hidden md:inline">Roles</span>
+                </button>
+                <button
+                  onClick={fetchAuditLogs}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
+                  title="Review activity logs"
+                >
+                  <ClipboardList size={14} />
+                  <span className="hidden md:inline">Audit logs</span>
                 </button>
                 <button
                   onClick={() => { setEditItem(null); setModalOpen(true) }}
@@ -1595,6 +1659,116 @@ export default function DashboardCMDB() {
                       }`}>{issue.severity}</span>
                     </div>
                   </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Administrative Audit Logs Modal */}
+      {auditLogsModal && (
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setAuditLogsModal(false)}>
+          <div className="modal-surface flex max-h-[86vh] w-full max-w-5xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 p-5">
+              <div className="flex items-center gap-3">
+                <ClipboardList size={20} className="text-cyan-400" />
+                <div>
+                  <h3 className="font-semibold">Administrative audit logs</h3>
+                  <p className="text-xs text-slate-500">Automatic retention: 15 days · latest 500 events</p>
+                </div>
+              </div>
+              <button onClick={() => setAuditLogsModal(false)} className="rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-2 border-b border-slate-800 p-4 sm:grid-cols-[1fr_220px_auto]">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3">
+                <Search size={14} className="text-slate-500" />
+                <input
+                  value={auditSearch}
+                  onChange={event => setAuditSearch(event.target.value)}
+                  placeholder="Search user, action, client or record..."
+                  className="w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-600"
+                />
+              </div>
+              <select
+                value={auditEventFilter}
+                onChange={event => setAuditEventFilter(event.target.value)}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none"
+              >
+                <option value="all">All event types</option>
+                <option value="authentication">Authentication</option>
+                <option value="data_change">Data changes</option>
+                <option value="security">Security and roles</option>
+              </select>
+              <button
+                onClick={fetchAuditLogs}
+                disabled={loadingAuditLogs}
+                className="flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm hover:bg-slate-700 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={loadingAuditLogs ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-2 overflow-y-auto p-4">
+              {loadingAuditLogs ? (
+                <div className="flex justify-center py-12"><RefreshCw size={22} className="animate-spin text-cyan-400" /></div>
+              ) : auditLogsError ? (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-300">
+                  {auditLogsError}
+                </div>
+              ) : filteredAuditLogs.length === 0 ? (
+                <p className="py-12 text-center text-sm text-slate-500">No audit events match these filters.</p>
+              ) : filteredAuditLogs.map(log => {
+                const isExpanded = expandedAuditLogId === log.id
+                const eventColor = log.event_type === 'authentication'
+                  ? 'bg-cyan-500/15 text-cyan-300'
+                  : log.event_type === 'security'
+                    ? 'bg-amber-500/15 text-amber-300'
+                    : 'bg-violet-500/15 text-violet-300'
+                return (
+                  <div key={log.id} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-800/40">
+                    <button
+                      onClick={() => setExpandedAuditLogId(isExpanded ? null : log.id)}
+                      className="flex w-full items-start justify-between gap-4 p-4 text-left hover:bg-slate-800/70"
+                    >
+                      <div className="min-w-0">
+                        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase ${eventColor}`}>
+                            {log.event_type.replace('_', ' ')}
+                          </span>
+                          <span className="text-xs font-medium text-slate-300">{log.actor_email ?? 'system'}</span>
+                        </div>
+                        <p className="text-sm text-white">{log.summary}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {log.entity_name ?? log.entity_type ?? 'Session'} · {log.action}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                        <span>{new Date(log.occurred_at).toLocaleString()}</span>
+                        <ChevronDown size={15} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="grid gap-3 border-t border-slate-800 bg-slate-950/50 p-4 lg:grid-cols-2">
+                        <div>
+                          <p className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">Previous values</p>
+                          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950 p-3 text-[11px] text-rose-200">
+                            {log.old_data ? JSON.stringify(log.old_data, null, 2) : 'No previous values'}
+                          </pre>
+                        </div>
+                        <div>
+                          <p className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">New values / metadata</p>
+                          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950 p-3 text-[11px] text-emerald-200">
+                            {JSON.stringify(log.new_data ?? log.metadata ?? {}, null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>

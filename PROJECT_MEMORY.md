@@ -52,6 +52,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
    **Actualización 2026-08-01:** se añadió infraestructura para correos de expiración y calidad de datos. `20260801_add_expiration_email_alerts.sql` crea configuración, auditoría de entregas y problemas deduplicados. `send-expiration-alerts` valida licencias, resuelve incidencias corregidas, evita correos duplicados y envía resúmenes mediante Resend. El dashboard permite configurar alertas y consultar problemas. Falta aplicar la migración, desplegar la Edge Function, configurar `RESEND_API_KEY`/`CRON_SECRET` y crear el Cron diario.
 
+**Actualización 2026-08-02:** se añadió `20260802_add_admin_audit_logs.sql` con auditoría inmutable de sesiones, clientes, ítems, roles, configuración de alertas y accesos/guardados de credenciales. Sólo administradores pueden consultar los eventos; PostgreSQL elimina automáticamente registros mayores a 15 días mediante `pg_cron`. El dashboard incorpora búsqueda, filtros y detalle de valores anteriores/nuevos. `AuthContext` diferencia cierre manual y cierre por inactividad. Falta aplicar la migración remota antes de utilizar el panel.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.
