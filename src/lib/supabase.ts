@@ -5,6 +5,16 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+export function clearLocalSupabaseSession(): void {
+  try {
+    const projectRef = new URL(supabaseUrl).hostname.split('.')[0]
+    localStorage.removeItem(`sb-${projectRef}-auth-token`)
+    localStorage.removeItem(`sb-${projectRef}-auth-token-code-verifier`)
+  } catch {
+    // The in-memory React session is still cleared when storage is unavailable.
+  }
+}
+
 export type CmdbClient = {
   id: string
   name: string

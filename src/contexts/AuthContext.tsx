@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react'
-import { supabase } from '../lib/supabase'
+import { clearLocalSupabaseSession, supabase } from '../lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
 
 const INACTIVITY_TIMEOUT = 15 * 60 * 1000
@@ -47,7 +47,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         new Promise(resolve => window.setTimeout(resolve, 800)),
       ]).catch(() => undefined)
     }
-    await supabase.auth.signOut({ scope: 'local' })
+
+    setSession(null)
+    setUser(null)
+    userRef.current = null
+
+    const sdkSignOut = supabase.auth.signOut({ scope: 'local' })
+    await Promise.race([
+      sdkSignOut,
+      new Promise(resolve => window.setTimeout(resolve, 1200)),
+    ]).catch(() => undefined)
+
+    // auth-js performs a network request even for local scope. If Safari loses
+    // that request, it returns before clearing storage, so remove the same
+    // browser keys explicitly as a final local fallback.
+    clearLocalSupabaseSession()
   }, [])
 
   const resetTimer = useCallback(() => {
