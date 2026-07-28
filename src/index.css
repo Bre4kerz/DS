@@ -2,6 +2,129 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+html[data-theme='light'] body {
+  background: #f1f5f9;
+}
+
+html[data-theme='light'] [class~="bg-[#050d18]"] {
+  background-color: #f1f5f9 !important;
+}
+
+html[data-theme='light'] [class~="bg-[#0a1220]"] {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] [class~='bg-slate-950'],
+html[data-theme='light'] [class~='bg-slate-950/30'],
+html[data-theme='light'] [class~='bg-slate-950/40'],
+html[data-theme='light'] [class~='bg-slate-950/50'],
+html[data-theme='light'] [class~='bg-slate-950/80'] {
+  background-color: #f8fafc !important;
+}
+
+html[data-theme='light'] [class~='bg-slate-900'],
+html[data-theme='light'] [class~='bg-slate-900/20'],
+html[data-theme='light'] [class~='bg-slate-900/50'],
+html[data-theme='light'] [class~='bg-slate-900/60'] {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] [class~='bg-slate-800'],
+html[data-theme='light'] [class~='bg-slate-800/30'],
+html[data-theme='light'] [class~='bg-slate-800/40'],
+html[data-theme='light'] [class~='bg-slate-800/50'],
+html[data-theme='light'] [class~='bg-slate-800/60'],
+html[data-theme='light'] [class~='bg-slate-800/70'] {
+  background-color: #f1f5f9 !important;
+}
+
+html[data-theme='light'] [class~='bg-slate-700'],
+html[data-theme='light'] [class~='bg-slate-700/50'],
+html[data-theme='light'] [class~='bg-slate-700/60'] {
+  background-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] [class~='border-slate-800'],
+html[data-theme='light'] [class~='border-slate-800/30'],
+html[data-theme='light'] [class~='border-slate-800/40'],
+html[data-theme='light'] [class~='border-slate-800/60'] {
+  border-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] [class~='border-slate-700'],
+html[data-theme='light'] [class~='border-slate-700/50'],
+html[data-theme='light'] [class~='border-slate-600'] {
+  border-color: #cbd5e1 !important;
+}
+
+html[data-theme='light'] [class~='text-white'] {
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] [class~='text-slate-300'] {
+  color: #334155 !important;
+}
+
+html[data-theme='light'] [class~='text-slate-400'] {
+  color: #475569 !important;
+}
+
+html[data-theme='light'] [class~='text-slate-500'],
+html[data-theme='light'] [class~='text-slate-600'],
+html[data-theme='light'] [class~='text-slate-700'] {
+  color: #64748b !important;
+}
+
+html[data-theme='light'] [class~='text-amber-200'],
+html[data-theme='light'] [class~='text-amber-300'],
+html[data-theme='light'] [class~='text-amber-400'],
+html[data-theme='light'] [class~='text-amber-400/50'],
+html[data-theme='light'] [class~='text-amber-400/60'],
+html[data-theme='light'] [class~='text-amber-500'],
+html[data-theme='light'] [class~='text-yellow-300'],
+html[data-theme='light'] [class~='text-yellow-300/90'],
+html[data-theme='light'] [class~='text-yellow-400'],
+html[data-theme='light'] [class~='text-yellow-400/80'] {
+  color: #92400e !important;
+}
+
+html[data-theme='light'] [class~='text-orange-300'],
+html[data-theme='light'] [class~='text-orange-400/80'] {
+  color: #9a3412 !important;
+}
+
+html[data-theme='light'] [class~='hover:text-amber-300']:hover {
+  color: #78350f !important;
+}
+
+html[data-theme='light'] input,
+html[data-theme='light'] textarea,
+html[data-theme='light'] select {
+  color: #0f172a;
+}
+
+html[data-theme='light'] input::placeholder,
+html[data-theme='light'] textarea::placeholder {
+  color: #94a3b8;
+}
+
+html[data-theme='light'] [class~='hover:bg-slate-700']:hover,
+html[data-theme='light'] [class~='hover:bg-slate-700/50']:hover,
+html[data-theme='light'] [class~='hover:bg-slate-700/60']:hover,
+html[data-theme='light'] [class~='hover:bg-slate-800']:hover,
+html[data-theme='light'] [class~='hover:bg-slate-800/30']:hover,
+html[data-theme='light'] [class~='hover:bg-slate-800/70']:hover {
+  background-color: #e2e8f0 !important;
+}
+
 .glow-row {
   animation: glowPulse 1.1s ease-out 2;
 }

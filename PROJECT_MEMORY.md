@@ -54,6 +54,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 **Actualización 2026-08-02:** se añadió `20260802_add_admin_audit_logs.sql` con auditoría inmutable de sesiones, clientes, ítems, roles, configuración de alertas y accesos/guardados de credenciales. Sólo administradores pueden consultar los eventos; PostgreSQL elimina automáticamente registros mayores a 15 días mediante `pg_cron`. El dashboard incorpora búsqueda, filtros y detalle de valores anteriores/nuevos. `AuthContext` diferencia cierre manual y cierre por inactividad. Falta aplicar la migración remota antes de utilizar el panel.
 
+**Actualización de tema:** el dashboard incluye modos oscuro (predeterminado) y claro. La selección se guarda en `localStorage` con una clave separada por ID de usuario y se aplica también a modales y formularios.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.

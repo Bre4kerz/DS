@@ -5,7 +5,8 @@ import {
   ChevronDown, ChevronRight, Search, Plus, RefreshCw, X,
   Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
   AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
-  Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList
+  Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList,
+  Moon, Sun
 } from 'lucide-react'
 import {
   supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
@@ -44,7 +45,45 @@ type DashboardNavigationState = {
   alertsExpanded: boolean
 }
 
+type ThemeMode = 'dark' | 'light'
+
 const getDashboardStateKey = (userId: string) => `cmdb-dashboard-state:${userId}`
+
+function ThemeToggle({ userId }: { userId: string }) {
+  const [theme, setTheme] = useState<ThemeMode>(() =>
+    localStorage.getItem(`cmdb-theme:${userId}`) === 'light' ? 'light' : 'dark',
+  )
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem(`cmdb-theme:${userId}`, theme)
+    return () => {
+      delete document.documentElement.dataset.theme
+    }
+  }, [theme, userId])
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={theme === 'light'}
+      aria-label={theme === 'dark' ? 'Activate light mode' : 'Activate dark mode'}
+      title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+      onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+      className="relative flex h-9 w-[68px] items-center rounded-full border border-slate-700 bg-slate-900 px-1 transition-colors"
+    >
+      <Moon size={13} className={`absolute left-2 transition-opacity ${theme === 'dark' ? 'opacity-100 text-cyan-300' : 'opacity-40 text-slate-500'}`} />
+      <Sun size={13} className={`absolute right-2 transition-opacity ${theme === 'light' ? 'opacity-100 text-amber-500' : 'opacity-40 text-slate-500'}`} />
+      <span
+        className={`h-7 w-7 rounded-full shadow-md transition-transform duration-200 ${
+          theme === 'light'
+            ? 'translate-x-[31px] bg-amber-400'
+            : 'translate-x-0 bg-cyan-600'
+        }`}
+      />
+    </button>
+  )
+}
 
 const readDashboardNavigationState = (userId?: string): DashboardNavigationState | null => {
   if (!userId) return null
@@ -967,7 +1006,8 @@ export default function DashboardCMDB() {
           <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 flex-col items-center">
             <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Services Dashboard</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
+            {user?.id && <ThemeToggle userId={user.id} />}
             <button
               onClick={fetchData}
               className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
@@ -1003,9 +1043,11 @@ export default function DashboardCMDB() {
                 </button>
                 <button
                   onClick={() => { setEditItem(null); setModalOpen(true) }}
-                  className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 px-4 py-2.5 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
+                  className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 p-2.5 sm:px-4 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
+                  title="New record"
                 >
-                  <Plus size={14} /> New record
+                  <Plus size={14} />
+                  <span className="hidden sm:inline">New record</span>
                 </button>
               </>
             )}
@@ -1543,15 +1585,15 @@ export default function DashboardCMDB() {
       {/* Email Alert Settings Modal */}
       {alertSettingsModal && (
         <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setAlertSettingsModal(false)}>
-          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl" onClick={event => event.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-slate-800">
+          <div className="modal-surface flex max-h-[90dvh] w-full max-w-lg flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex flex-shrink-0 items-center justify-between p-5 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Calendar size={17} className="text-amber-400" />
                 <h3 className="font-semibold">Expiration email alerts</h3>
               </div>
               <button onClick={() => setAlertSettingsModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <label className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
                 <span>
                   <span className="block text-sm font-medium">Enable scheduled emails</span>
@@ -1601,7 +1643,7 @@ export default function DashboardCMDB() {
                 }`}>{alertSettingsMessage}</p>
               )}
             </div>
-            <div className="flex justify-end gap-2 border-t border-slate-800 p-5">
+            <div className="flex flex-shrink-0 justify-end gap-2 border-t border-slate-800 p-4 sm:p-5">
               <button onClick={() => setAlertSettingsModal(false)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">Close</button>
               <button
                 onClick={saveAlertSettings}
@@ -1733,21 +1775,23 @@ export default function DashboardCMDB() {
                   <div key={log.id} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-800/40">
                     <button
                       onClick={() => setExpandedAuditLogId(isExpanded ? null : log.id)}
-                      className="flex w-full items-start justify-between gap-4 p-4 text-left hover:bg-slate-800/70"
+                      className="flex w-full flex-col items-stretch gap-3 p-4 text-left hover:bg-slate-800/70 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
                     >
                       <div className="min-w-0">
                         <div className="mb-1.5 flex flex-wrap items-center gap-2">
                           <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase ${eventColor}`}>
                             {log.event_type.replace('_', ' ')}
                           </span>
-                          <span className="text-xs font-medium text-slate-300">{log.actor_email ?? 'system'}</span>
+                          <span className="max-w-full truncate text-xs font-medium text-slate-300" title={log.actor_email ?? 'system'}>
+                            {log.actor_email ?? 'system'}
+                          </span>
                         </div>
-                        <p className="text-sm text-white">{log.summary}</p>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="break-words text-sm text-white">{log.summary}</p>
+                        <p className="mt-1 break-words text-xs text-slate-500">
                           {log.entity_name ?? log.entity_type ?? 'Session'} · {log.action}
                         </p>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                      <div className="flex shrink-0 items-center justify-between gap-2 text-xs text-slate-500 sm:justify-end">
                         <span>{new Date(log.occurred_at).toLocaleString()}</span>
                         <ChevronDown size={15} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </div>
@@ -1788,18 +1832,18 @@ export default function DashboardCMDB() {
               <button onClick={() => setRolesModal(false)} className="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800"><X size={18} /></button>
             </div>
             <div className="overflow-y-auto flex-1 p-4 space-y-3">
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <input
                   type="email"
                   value={newRoleEmail}
                   onChange={e => setNewRoleEmail(e.target.value)}
                   placeholder="email@empresa.com"
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 outline-none"
+                  className="min-w-0 flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 outline-none"
                 />
                 <select
                   value={newRoleValue}
                   onChange={e => setNewRoleValue(e.target.value as 'admin' | 'viewer')}
-                  className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none sm:w-auto"
                 >
                   <option value="admin">Admin</option>
                   <option value="viewer">Viewer</option>
@@ -1807,7 +1851,7 @@ export default function DashboardCMDB() {
                 <button
                   onClick={saveRole}
                   disabled={!newRoleEmail.trim() || savingRoleEmail !== null}
-                  className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-xl text-sm transition-all whitespace-nowrap"
+                  className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-xl text-sm transition-all whitespace-nowrap sm:w-auto"
                 >
                   {savingRoleEmail === newRoleEmail.trim() ? 'Saving…' : '+ Agregar'}
                 </button>
@@ -1821,11 +1865,11 @@ export default function DashboardCMDB() {
                 <p className="text-center text-slate-500 text-sm py-6">No roles configured</p>
               ) : (
                 allRoles.map(r => (
-                  <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3">
+                  <div key={r.id} className="flex flex-col items-stretch gap-3 rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{r.user_email}</p>
+                      <p className="truncate text-sm font-medium" title={r.user_email}>{r.user_email}</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2 sm:justify-end">
                       <select
                         value={r.role}
                         onChange={event => setPendingRoleAction({
