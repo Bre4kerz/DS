@@ -996,10 +996,10 @@ export default function DashboardCMDB() {
   }, [loading])
 
   return (
-    <div className="min-h-screen bg-[#050d18] text-white font-sans">
+    <div className="min-h-screen w-full min-w-0 bg-[#050d18] text-white font-sans">
       {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm sticky top-0 z-30 relative">
-        <div className="mx-auto max-w-[1800px] px-4 md:px-6 py-4 flex items-center justify-between gap-2 flex-wrap">
+      <header className="sticky top-0 z-30 w-full min-w-0 border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm">
+        <div className="mx-auto flex w-full min-w-0 max-w-[1800px] flex-wrap items-center justify-between gap-2 px-4 py-4 md:px-6">
           <div className="flex items-center">
             <img src={logoImg} alt="JoSYS" className="h-8 md:h-10 w-auto object-contain brightness-125" />
           </div>
@@ -1063,10 +1063,10 @@ export default function DashboardCMDB() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-[1800px] p-4 md:p-6">
-        <div className="grid gap-4 lg:grid-cols-[420px_1fr]">
+      <div className="mx-auto w-full min-w-0 max-w-[1800px] p-4 md:p-6">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[420px_minmax(0,1fr)]">
           {/* Sidebar */}
-          <aside className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/50 p-4 shadow-xl h-fit">
+          <aside className="min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/50 p-4 shadow-xl h-fit">
             {/* Search */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3 relative">
               <div className="flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3">
@@ -1218,7 +1218,7 @@ export default function DashboardCMDB() {
           </aside>
 
           {/* Main content */}
-          <main className="space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
+          <main className="min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
             {/* Expiration alerts - always visible */}
      
             {!loading && (

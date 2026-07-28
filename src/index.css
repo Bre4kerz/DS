@@ -10,8 +10,23 @@ html[data-theme='light'] {
   color-scheme: light;
 }
 
-html[data-theme='light'] body {
-  background: #f1f5f9;
+html[data-theme='light'],
+html[data-theme='light'] body,
+html[data-theme='light'] #root {
+  background-color: #f1f5f9 !important;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+}
+
+html,
+body {
+  overflow-x: clip;
 }
 
 html[data-theme='light'] [class~="bg-[#050d18]"] {
