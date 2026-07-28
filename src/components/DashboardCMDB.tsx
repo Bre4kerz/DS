@@ -35,6 +35,38 @@ type ClientWithItems = CmdbClient & {
   sections: SectionData[]
 }
 
+type DashboardNavigationState = {
+  selectedClientId: string | null
+  openSections: string[]
+  categoryFilter: string
+  alertThreshold: number
+  alertStatus: string
+  alertsExpanded: boolean
+}
+
+const getDashboardStateKey = (userId: string) => `cmdb-dashboard-state:${userId}`
+
+const readDashboardNavigationState = (userId?: string): DashboardNavigationState | null => {
+  if (!userId) return null
+  try {
+    const stored = localStorage.getItem(getDashboardStateKey(userId))
+    if (!stored) return null
+    const parsed = JSON.parse(stored) as Partial<DashboardNavigationState>
+    return {
+      selectedClientId: typeof parsed.selectedClientId === 'string' ? parsed.selectedClientId : null,
+      openSections: Array.isArray(parsed.openSections)
+        ? parsed.openSections.filter((section): section is string => typeof section === 'string')
+        : [],
+      categoryFilter: typeof parsed.categoryFilter === 'string' ? parsed.categoryFilter : 'All',
+      alertThreshold: typeof parsed.alertThreshold === 'number' ? parsed.alertThreshold : 365,
+      alertStatus: typeof parsed.alertStatus === 'string' ? parsed.alertStatus : 'All',
+      alertsExpanded: typeof parsed.alertsExpanded === 'boolean' ? parsed.alertsExpanded : true,
+    }
+  } catch {
+    return null
+  }
+}
+
 function StatusPill({ status }: { status: string }) {
   const label: Record<string, string> = {
     'OK': 'OK',
@@ -458,6 +490,10 @@ function isProcessStale(item: CmdbItem, staleDays = 5): boolean {
 
 export default function DashboardCMDB() {
   const { user, signOut } = useAuth()
+  const restoredNavigation = useMemo(
+    () => readDashboardNavigationState(user?.id),
+    [user?.id],
+  )
   const {
     clients,
     allItems,
@@ -478,14 +514,18 @@ export default function DashboardCMDB() {
   const [search, setSearch] = useState('')
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null)
-  const [openSections, setOpenSections] = useState<Set<string>>(new Set())
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    () => new Set(restoredNavigation?.openSections ?? []),
+  )
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(
+    restoredNavigation?.selectedClientId ?? null,
+  )
   const [statsModal, setStatsModal] = useState<null | 'clients' | 'total' | 'expiring' | 'critical' | 'alerts'>(null)
   const [modalSearch, setModalSearch] = useState('')
-  const [alertThreshold, setAlertThreshold] = useState<number>(365)
-  const [alertsExpanded, setAlertsExpanded] = useState(true)
-  const [alertStatus, setAlertStatus] = useState('All')
-  const [categoryFilter, setCategoryFilter] = useState<string>('All')
+  const [alertThreshold, setAlertThreshold] = useState<number>(restoredNavigation?.alertThreshold ?? 365)
+  const [alertsExpanded, setAlertsExpanded] = useState(restoredNavigation?.alertsExpanded ?? true)
+  const [alertStatus, setAlertStatus] = useState(restoredNavigation?.alertStatus ?? 'All')
+  const [categoryFilter, setCategoryFilter] = useState<string>(restoredNavigation?.categoryFilter ?? 'All')
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
   const [rolesModal, setRolesModal] = useState(false)
   const [alertSettingsModal, setAlertSettingsModal] = useState(false)
@@ -516,10 +556,31 @@ export default function DashboardCMDB() {
   const [savingClient, setSavingClient] = useState(false)
 
   useEffect(() => {
-    if (clients.length > 0 && !selectedClientId) {
+    if (clients.length > 0 && (!selectedClientId || !clients.some(client => client.id === selectedClientId))) {
       setSelectedClientId(clients[0].id)
     }
   }, [clients, selectedClientId])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const navigationState: DashboardNavigationState = {
+      selectedClientId,
+      openSections: [...openSections],
+      categoryFilter,
+      alertThreshold,
+      alertStatus,
+      alertsExpanded,
+    }
+    localStorage.setItem(getDashboardStateKey(user.id), JSON.stringify(navigationState))
+  }, [
+    user?.id,
+    selectedClientId,
+    openSections,
+    categoryFilter,
+    alertThreshold,
+    alertStatus,
+    alertsExpanded,
+  ])
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
