@@ -56,6 +56,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 **Actualización de tema:** el dashboard incluye modos oscuro (predeterminado) y claro. La selección se guarda en `localStorage` con una clave separada por ID de usuario y se aplica también a modales y formularios.
 
+**Actualización de documentación:** `README.md` es la entrada principal y `docs/` contiene guía de usuario, arquitectura/base de datos, operación/despliegue y seguridad. `.env.example` documenta únicamente las variables públicas requeridas.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.

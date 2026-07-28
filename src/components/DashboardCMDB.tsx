@@ -1052,9 +1052,11 @@ export default function DashboardCMDB() {
               </>
             )}
             <button
+              type="button"
               onClick={() => signOut()}
               title={user?.email ?? 'Sign out'}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 px-3 py-2.5 rounded-xl text-sm transition-all"
+              aria-label="Sign out"
+              className="flex min-h-10 min-w-10 touch-manipulation items-center justify-center gap-2 bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 px-3 py-2.5 rounded-xl text-sm transition-all"
             >
               <LogOut size={14} />
               <span className="hidden md:inline">Sign out</span>

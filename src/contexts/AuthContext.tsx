@@ -38,12 +38,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async (reason: 'manual' | 'inactivity' = 'manual') => {
     if (userRef.current) {
-      await supabase.rpc('log_cmdb_auth_event', {
+      const auditRequest = supabase.rpc('log_cmdb_auth_event', {
         p_action: reason === 'inactivity' ? 'inactivity_logout' : 'logout',
         p_metadata: { source: 'dashboard' },
       })
+      await Promise.race([
+        auditRequest,
+        new Promise(resolve => window.setTimeout(resolve, 800)),
+      ]).catch(() => undefined)
     }
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'local' })
   }, [])
 
   const resetTimer = useCallback(() => {

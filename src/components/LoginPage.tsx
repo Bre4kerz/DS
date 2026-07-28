@@ -192,6 +192,13 @@ export default function LoginPage() {
             </button>
           </div>
         </MemoizedBorderGlow>
+
+        <p
+          className="absolute left-4 right-4 z-10 text-center text-xs tracking-wide text-white/40"
+          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+        >
+          Developed by Federico Arredondo · 2026
+        </p>
       </div>
     </>
   )
