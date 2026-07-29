@@ -44,6 +44,18 @@ Puede leer los datos operativos permitidos por RLS. No puede modificar clientes,
 Conserva permisos administrativos predeterminados, pero cada capacidad puede
 ser concedida o revocada.
 
+Los permisos se validan nuevamente en PostgreSQL. Desactivar una opción no se
+limita a ocultar el botón: las políticas RLS y las RPC protegidas rechazan la
+operación directa.
+
+Un usuario con `Manage permissions` puede administrar cuentas que no sean
+superuser, pero no puede elevarse a superuser ni modificar uno existente.
+
+`Import / export data` sólo muestra la herramienta. La exportación sigue
+limitada por RLS a filas visibles y la importación requiere también
+`Create records`; por ello conceder transferencia no evita las políticas de
+datos.
+
 La migración `20260803_add_granular_access_control.sql` impide:
 
 - eliminar al último superuser;

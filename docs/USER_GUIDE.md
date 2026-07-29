@@ -101,6 +101,27 @@ categorías puede ver o editar cada usuario. Puede permitir que otra cuenta
 administre permisos, pero sólo un superuser puede modificar superusers. El
 sistema no permite eliminar ni degradar al último superuser.
 
+Para personalizar una cuenta:
+
+1. Abre **Access Control**.
+2. Selecciona su rol base.
+3. Activa o desactiva permisos funcionales.
+4. En **Category scope**, define qué secciones puede ver o editar.
+
+Los cambios se guardan al presionar cada interruptor y se propagan
+automáticamente mediante Realtime. Si la red bloquea Realtime, volver a iniciar
+sesión fuerza la actualización.
+
+Las plantillas `Viewer`, `Support`, `Renewals`, `Auditor` y `Admin` permiten
+aplicar conjuntos de permisos rápidamente.
+
+### Import / export
+
+El botón **Data** permite exportar los registros visibles a CSV. Si también
+tienes permiso para crear registros, puedes importar un CSV con validación,
+vista previa y omisión de duplicados. Las credenciales nunca forman parte del
+archivo.
+
 ### Audit logs
 
 Consulta inicios y cierres de sesión, modificaciones, roles y accesos a

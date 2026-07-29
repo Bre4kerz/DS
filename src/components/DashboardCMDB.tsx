@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, useMemo } from 'react'
+import { Fragment, Suspense, lazy, useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import logoImg from '../assets/logo1.png'
 import {
@@ -6,7 +6,7 @@ import {
   Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
   AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
   Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList,
-  Moon, Sun
+  Moon, Sun, ArrowUpDown
 } from 'lucide-react'
 import {
   supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
@@ -15,6 +15,8 @@ import {
 } from '../lib/supabase'
 import ItemModal from './ItemModal'
 import { CMDB_PERMISSION_KEYS, useCmdbData, type CmdbPermission } from '../hooks/useCmdbData'
+
+const DataTransferModal = lazy(() => import('./DataTransferModal'))
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'Servers': <Server size={18} />,
@@ -59,9 +61,19 @@ const PERMISSION_LABELS: Record<CmdbPermission, string> = {
   'alerts.view': 'View alerts',
   'alerts.configure': 'Configure alerts',
   'quality.view': 'View data quality',
+  'quality.configure': 'Configure quality rules',
   'audit.view': 'View audit logs',
   'roles.manage': 'Manage roles',
   'permissions.manage': 'Manage permissions',
+  'data.transfer': 'Import / export data',
+}
+
+const PERMISSION_TEMPLATES: Record<string, CmdbPermission[]> = {
+  Viewer: ['records.view', 'history.view', 'alerts.view', 'quality.view'],
+  Support: ['records.view', 'records.create', 'records.edit', 'credentials.view', 'history.view', 'alerts.view', 'quality.view'],
+  Renewals: ['records.view', 'records.edit', 'history.view', 'alerts.view', 'quality.view', 'data.transfer'],
+  Auditor: ['records.view', 'history.view', 'alerts.view', 'quality.view', 'audit.view', 'data.transfer'],
+  Admin: CMDB_PERMISSION_KEYS.filter(permission => permission !== 'permissions.manage'),
 }
 
 const getDashboardStateKey = (userId: string) => `cmdb-dashboard-state:${userId}`
@@ -210,6 +222,24 @@ type AuditLog = {
   old_data: Record<string, unknown> | null
   new_data: Record<string, unknown> | null
   metadata: Record<string, unknown>
+}
+
+type ExpirationNotification = {
+  id: number
+  item_id: string
+  expiration_date: string
+  threshold_days: number
+  recipient: string
+  status: 'sent' | 'failed'
+  error: string | null
+  sent_at: string
+}
+
+type QualityRule = {
+  issue_code: string
+  label: string
+  enabled: boolean
+  severity: 'critical' | 'error' | 'warning'
 }
 
 function CopyableIp({ value }: { value: string }) {
@@ -607,6 +637,7 @@ export default function DashboardCMDB() {
   const [categoryFilter, setCategoryFilter] = useState<string>(restoredNavigation?.categoryFilter ?? 'All')
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
   const [rolesModal, setRolesModal] = useState(false)
+  const [dataTransferModal, setDataTransferModal] = useState(false)
   const [rolePermissions, setRolePermissions] = useState<Record<string, Set<CmdbPermission>>>({})
   const [roleCategoryAccess, setRoleCategoryAccess] = useState<Record<string, Record<string, { view: boolean; edit: boolean }>>>({})
   const [auditLogsModal, setAuditLogsModal] = useState(false)
@@ -619,6 +650,12 @@ export default function DashboardCMDB() {
   const [alertSettingsModal, setAlertSettingsModal] = useState(false)
   const [qualityIssuesModal, setQualityIssuesModal] = useState(false)
   const [qualityIssues, setQualityIssues] = useState<QualityIssue[]>([])
+  const [qualitySearch, setQualitySearch] = useState('')
+  const [qualitySeverity, setQualitySeverity] = useState('all')
+  const [qualityRules, setQualityRules] = useState<QualityRule[]>([])
+  const [notificationHistoryModal, setNotificationHistoryModal] = useState(false)
+  const [notifications, setNotifications] = useState<ExpirationNotification[]>([])
+  const [loadingNotifications, setLoadingNotifications] = useState(false)
   const [alertSettings, setAlertSettings] = useState({
     enabled: false,
     thresholds: '90, 60, 30, 15, 7, 1, 0',
@@ -841,6 +878,26 @@ export default function DashboardCMDB() {
     }
   }
 
+  const applyPermissionTemplate = async (roleId: string, templateName: string) => {
+    const selected = new Set(PERMISSION_TEMPLATES[templateName] ?? [])
+    setRoleError('')
+    setRolePermissions(current => ({ ...current, [roleId]: selected }))
+    const { error } = await supabase.from('cmdb_user_permissions').upsert(
+      CMDB_PERMISSION_KEYS.map(permission => ({
+        role_id: roleId,
+        permission_key: permission,
+        allowed: selected.has(permission),
+        updated_at: new Date().toISOString(),
+        updated_by: user?.id ?? null,
+      })),
+      { onConflict: 'role_id,permission_key' },
+    )
+    if (error) {
+      setRoleError(error.message)
+      await fetchRoles()
+    }
+  }
+
   const toggleCategoryAccess = async (
     roleId: string,
     category: string,
@@ -898,13 +955,50 @@ export default function DashboardCMDB() {
   }
 
   const fetchQualityIssues = async (openModal = false) => {
-    const { data } = await supabase
-      .from('cmdb_data_quality_issues')
-      .select('*')
-      .is('resolved_at', null)
-      .order('last_detected_at', { ascending: false })
+    const [{ data }, { data: rules }] = await Promise.all([
+      supabase.from('cmdb_data_quality_issues')
+        .select('*').is('resolved_at', null).order('last_detected_at', { ascending: false }),
+      supabase.from('cmdb_quality_rule_settings').select('*').order('severity'),
+    ])
     setQualityIssues((data ?? []) as QualityIssue[])
+    setQualityRules((rules ?? []) as QualityRule[])
     if (openModal) setQualityIssuesModal(true)
+  }
+
+  const toggleQualityRule = async (rule: QualityRule) => {
+    const enabled = !rule.enabled
+    setQualityRules(current => current.map(candidate =>
+      candidate.issue_code === rule.issue_code ? { ...candidate, enabled } : candidate,
+    ))
+    const { error } = await supabase.from('cmdb_quality_rule_settings').update({
+      enabled,
+      updated_at: new Date().toISOString(),
+      updated_by: user?.id ?? null,
+    }).eq('issue_code', rule.issue_code)
+    if (error) {
+      setRoleError(error.message)
+      await fetchQualityIssues()
+    }
+  }
+
+  const fetchNotificationHistory = async () => {
+    setNotificationHistoryModal(true)
+    setLoadingNotifications(true)
+    const { data } = await supabase.from('cmdb_expiration_notifications')
+      .select('*').order('sent_at', { ascending: false }).limit(500)
+    setNotifications((data ?? []) as ExpirationNotification[])
+    setLoadingNotifications(false)
+  }
+
+  const queueNotificationRetry = async (notificationId: number) => {
+    const { error } = await supabase.rpc('queue_cmdb_notification_retry', {
+      p_notification_id: notificationId,
+    })
+    if (error) {
+      console.error('Could not queue notification retry:', error)
+      return
+    }
+    setNotifications(current => current.filter(notification => notification.id !== notificationId))
   }
 
   const openAlertSettings = async () => {
@@ -1020,6 +1114,17 @@ export default function DashboardCMDB() {
     })
   }, [auditLogs, auditSearch, auditEventFilter])
 
+  const filteredQualityIssues = useMemo(() => {
+    const query = qualitySearch.trim().toLowerCase()
+    return qualityIssues.filter(issue => {
+      if (qualitySeverity !== 'all' && issue.severity !== qualitySeverity) return false
+      const item = allItems.find(candidate => candidate.id === issue.item_id)
+      const client = clients.find(candidate => candidate.id === item?.client_id)
+      return !query || [issue.message, issue.issue_code, item?.name, client?.name]
+        .some(value => value?.toLowerCase().includes(query))
+    })
+  }, [qualityIssues, qualitySearch, qualitySeverity, allItems, clients])
+
   const globalStats = useMemo(() => ({
     clients: clients.length,
     total: allItems.length,
@@ -1124,7 +1229,7 @@ export default function DashboardCMDB() {
           <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 flex-col items-center">
             <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Services Dashboard</span>
           </div>
-          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
+          <div className="flex w-full flex-wrap items-center justify-between gap-1 sm:w-auto sm:justify-end sm:gap-2">
             {user?.id && <ThemeToggle userId={user.id} />}
             <button
               onClick={fetchData}
@@ -1133,7 +1238,7 @@ export default function DashboardCMDB() {
             >
               <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             </button>
-            {(hasPermission('alerts.configure') || hasPermission('roles.manage') || hasPermission('audit.view') || hasPermission('records.create')) && (
+            {(hasPermission('alerts.configure') || hasPermission('roles.manage') || hasPermission('audit.view') || hasPermission('data.transfer') || hasPermission('records.create')) && (
               <>
                 {hasPermission('alerts.configure') && <button
                   onClick={openAlertSettings}
@@ -1158,6 +1263,14 @@ export default function DashboardCMDB() {
                 >
                   <ClipboardList size={14} />
                   <span className="hidden md:inline">Audit logs</span>
+                </button>}
+                {hasPermission('data.transfer') && <button
+                  onClick={() => setDataTransferModal(true)}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
+                  title="Import or export CMDB data"
+                >
+                  <ArrowUpDown size={14} />
+                  <span className="hidden md:inline">Data</span>
                 </button>}
                 {hasPermission('records.create') && <button
                   onClick={() => { setEditItem(null); setModalOpen(true) }}
@@ -1592,6 +1705,18 @@ export default function DashboardCMDB() {
         />
       )}
 
+      {dataTransferModal && (
+        <Suspense fallback={null}>
+          <DataTransferModal
+            clients={clients}
+            items={allItems}
+            canImport={hasPermission('records.create')}
+            onClose={() => setDataTransferModal(false)}
+            onImported={fetchData}
+          />
+        </Suspense>
+      )}
+
       {/* Delete confirm */}
       {deleteConfirm && (
         <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirm(null)}>
@@ -1767,7 +1892,10 @@ export default function DashboardCMDB() {
                 }`}>{alertSettingsMessage}</p>
               )}
             </div>
-            <div className="flex flex-shrink-0 justify-end gap-2 border-t border-slate-800 p-4 sm:p-5">
+            <div className="flex flex-shrink-0 flex-wrap justify-end gap-2 border-t border-slate-800 p-4 sm:p-5">
+              <button onClick={fetchNotificationHistory} className="w-full rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 sm:mr-auto sm:w-auto">
+                Delivery history
+              </button>
               <button onClick={() => setAlertSettingsModal(false)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">Close</button>
               <button
                 onClick={saveAlertSettings}
@@ -1776,6 +1904,55 @@ export default function DashboardCMDB() {
               >
                 {savingAlertSettings ? 'Saving…' : 'Save settings'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notificationHistoryModal && (
+        <div className="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={() => setNotificationHistoryModal(false)}>
+          <div className="modal-surface flex max-h-[86dvh] w-full max-w-4xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-800 p-5">
+              <div>
+                <h3 className="font-semibold">Expiration delivery history</h3>
+                <p className="text-xs text-slate-500">{notifications.length} recent delivery record(s)</p>
+              </div>
+              <button onClick={() => setNotificationHistoryModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto p-4">
+              {loadingNotifications ? (
+                <RefreshCw className="mx-auto my-10 animate-spin text-cyan-400" size={22} />
+              ) : notifications.length === 0 ? (
+                <p className="py-10 text-center text-sm text-slate-500">No deliveries have been recorded.</p>
+              ) : notifications.map(notification => {
+                const item = allItems.find(candidate => candidate.id === notification.item_id)
+                const client = clients.find(candidate => candidate.id === item?.client_id)
+                return (
+                  <div key={notification.id} className="rounded-xl border border-slate-800 bg-slate-800/40 p-4">
+                    <div className="flex flex-col justify-between gap-2 sm:flex-row">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{item?.name ?? 'Deleted license'}</p>
+                        <p className="text-xs text-slate-500">{client?.name ?? 'Unknown client'} · {notification.recipient}</p>
+                      </div>
+                      <span className={`h-fit rounded-full px-2 py-1 text-[10px] uppercase ${notification.status === 'sent' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>
+                        {notification.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">
+                      Expiration {notification.expiration_date} · threshold {notification.threshold_days}d · {new Date(notification.sent_at).toLocaleString()}
+                    </p>
+                    {notification.error && <p className="mt-2 text-xs text-rose-300">{notification.error}</p>}
+                    {hasPermission('alerts.configure') && (
+                      <button
+                        onClick={() => queueNotificationRetry(notification.id)}
+                        className="mt-3 rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600"
+                      >
+                        Queue for resend
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
@@ -1792,13 +1969,44 @@ export default function DashboardCMDB() {
               </div>
               <button onClick={() => setQualityIssuesModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
             </div>
+            <div className="grid gap-2 border-b border-slate-800 p-4 sm:grid-cols-[1fr_180px]">
+              <input
+                value={qualitySearch}
+                onChange={event => setQualitySearch(event.target.value)}
+                placeholder="Search client, license or issue..."
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none"
+              />
+              <select
+                value={qualitySeverity}
+                onChange={event => setQualitySeverity(event.target.value)}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none"
+              >
+                <option value="all">All severities</option>
+                <option value="critical">Critical</option>
+                <option value="error">Error</option>
+                <option value="warning">Warning</option>
+              </select>
+            </div>
+            {hasPermission('quality.configure') && qualityRules.length > 0 && (
+              <div className="border-b border-slate-800 p-4">
+                <p className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">Validation rules</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {qualityRules.map(rule => (
+                    <label key={rule.issue_code} className="flex items-center justify-between gap-3 rounded-lg bg-slate-800/50 px-3 py-2 text-xs">
+                      <span className="truncate" title={rule.label}>{rule.label}</span>
+                      <input type="checkbox" checked={rule.enabled} onChange={() => toggleQualityRule(rule)} className="h-4 w-4 accent-cyan-500" />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {qualityIssues.length === 0 ? (
+              {filteredQualityIssues.length === 0 ? (
                 <div className="py-10 text-center text-emerald-400">
                   <CheckCircle size={30} className="mx-auto mb-2" />
                   <p className="text-sm">No unresolved data issues.</p>
                 </div>
-              ) : qualityIssues.map(issue => {
+              ) : filteredQualityIssues.map(issue => {
                 const item = allItems.find(candidate => candidate.id === issue.item_id)
                 const client = clients.find(candidate => candidate.id === item?.client_id)
                 return (
@@ -2026,7 +2234,23 @@ export default function DashboardCMDB() {
                     {hasPermission('permissions.manage') && (
                       <div className="mt-3 space-y-4 border-t border-slate-700/50 pt-3">
                         <div>
-                          <p className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">Functional permissions</p>
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-500">Functional permissions</p>
+                            {r.role !== 'superuser' && (
+                              <div className="flex flex-wrap gap-1">
+                                {Object.keys(PERMISSION_TEMPLATES).map(template => (
+                                  <button
+                                    key={template}
+                                    type="button"
+                                    onClick={() => applyPermissionTemplate(r.id, template)}
+                                    className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-400 hover:border-cyan-500/50 hover:text-cyan-300"
+                                  >
+                                    {template}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                           <div className="grid gap-2 sm:grid-cols-2">
                             {CMDB_PERMISSION_KEYS.map(permission => (
                               <label key={permission} className="flex items-center gap-2 text-xs text-slate-300">

@@ -18,7 +18,8 @@ export const CMDB_PERMISSION_KEYS = [
   'records.view', 'records.create', 'records.edit', 'records.delete',
   'credentials.view', 'credentials.edit', 'history.view',
   'alerts.view', 'alerts.configure', 'quality.view',
-  'audit.view', 'roles.manage', 'permissions.manage',
+  'quality.configure', 'audit.view', 'roles.manage', 'permissions.manage',
+  'data.transfer',
 ] as const
 
 export type CmdbPermission = typeof CMDB_PERMISSION_KEYS[number]
@@ -74,29 +75,44 @@ export function useCmdbData(user: User | null) {
 
   useEffect(() => {
     if (!user?.email) return
-    supabase.from('cmdb_user_roles').select('*').eq('user_email', user.email).maybeSingle()
-      .then(({ data }) => {
-        const role = data?.role as CmdbRole | undefined
-        setUserRole(role ?? 'viewer')
-        const defaults = role === 'superuser'
-          ? CMDB_PERMISSION_KEYS
-          : role === 'admin'
-            ? CMDB_PERMISSION_KEYS.filter(permission => permission !== 'permissions.manage')
-            : ['records.view', 'history.view', 'alerts.view', 'quality.view'] as CmdbPermission[]
-        Promise.all(CMDB_PERMISSION_KEYS.map(async permission => {
-          const { data: allowed, error } = await supabase.rpc('cmdb_has_permission', {
-            p_permission: permission,
-          })
-          return { permission, allowed: allowed === true, failed: Boolean(error) }
-        })).then(results => {
-          const rpcAvailable = results.some(result => !result.failed)
-          const resolved = results
-            .filter(result => !result.failed && result.allowed)
-            .map(result => result.permission)
-          setPermissions(new Set(rpcAvailable ? resolved : defaults))
+    const loadAccess = async () => {
+      const { data } = await supabase.from('cmdb_user_roles')
+        .select('*').eq('user_email', user.email!).maybeSingle()
+      const role = data?.role as CmdbRole | undefined
+      setUserRole(role ?? 'viewer')
+      const defaults = role === 'superuser'
+        ? CMDB_PERMISSION_KEYS
+        : role === 'admin'
+          ? CMDB_PERMISSION_KEYS.filter(permission => permission !== 'permissions.manage')
+          : ['records.view', 'history.view', 'alerts.view', 'quality.view'] as CmdbPermission[]
+      const results = await Promise.all(CMDB_PERMISSION_KEYS.map(async permission => {
+        const { data: allowed, error } = await supabase.rpc('cmdb_has_permission', {
+          p_permission: permission,
         })
-      })
-  }, [user])
+        return { permission, allowed: allowed === true, failed: Boolean(error) }
+      }))
+      const rpcAvailable = results.some(result => !result.failed)
+      const resolved = results
+        .filter(result => !result.failed && result.allowed)
+        .map(result => result.permission)
+      setPermissions(new Set(rpcAvailable ? resolved : defaults))
+    }
+
+    void loadAccess()
+    const refreshAccess = () => {
+      void loadAccess()
+      void fetchData()
+    }
+    const channel = supabase.channel(`cmdb-access-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cmdb_user_roles' }, refreshAccess)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cmdb_user_permissions' }, refreshAccess)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cmdb_user_category_access' }, refreshAccess)
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [user?.email, user?.id, fetchData])
 
   const duplicateItem = useCallback(async (item: CmdbItem) => {
     const rest: Partial<CmdbItem> = { ...item }

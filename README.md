@@ -10,6 +10,10 @@ credenciales protegidas y alertas de vencimiento.
 - Alertas visuales y correos programados de expiración.
 - Registro de problemas de calidad de datos.
 - Roles `superuser`, `admin` y `viewer`, permisos granulares y alcance por categoría.
+- Plantillas de permisos y actualización automática mediante Realtime.
+- Importación y exportación CSV protegida por `data.transfer`.
+- Historial de entregas de correo y reintentos programados.
+- Reglas configurables y filtros para calidad de datos.
 - Credenciales cifradas con Supabase Vault y revelado exclusivo para admins.
 - Historial por ítem y panel administrativo de auditoría.
 - Cierre de sesión tras 15 minutos de inactividad.
@@ -59,6 +63,7 @@ La dirección local predeterminada de Vite es `http://localhost:5173`.
 ```powershell
 npm run typecheck
 npm run lint
+npm run test
 npm run build
 ```
 
@@ -81,8 +86,12 @@ No ejecutes dos veces una migración que ya haya sido aplicada.
 Para una instalación existente, la migración más reciente es:
 
 ```text
-20260802_add_admin_audit_logs.sql
+20260804_add_quality_rules_and_data_transfer.sql
 ```
+
+Esta migración asigna inicialmente `superuser` a
+`bhernandez@josys.com.mx`. Después de aplicarla, despliega el frontend y vuelve
+a iniciar sesión para cargar los permisos.
 
 ## Acceso y permisos
 

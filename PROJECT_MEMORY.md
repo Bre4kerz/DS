@@ -60,6 +60,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 **Actualización de acceso granular:** `20260803_add_granular_access_control.sql` añade `superuser`, permisos funcionales y restricciones de visualización/edición por categoría. La migración promueve `bhernandez@josys.com.mx`, protege al último superuser y reemplaza políticas RLS relevantes. El modal de roles se convirtió en **Access Control**. Falta ejecutar esta migración en Supabase antes de desplegar el frontend asociado.
 
+**Actualización 2026-08-04:** se añadió `data.transfer` y `quality.configure`, plantillas de permisos, sincronización Realtime, importación/exportación CSV con validación, historial de entregas con cola de reenvío, reglas/filtros de calidad, pruebas Vitest/SQL y carga diferida. `20260804_add_quality_rules_and_data_transfer.sql` debe aplicarse después de `20260803`, y la Edge Function debe volver a desplegarse.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.

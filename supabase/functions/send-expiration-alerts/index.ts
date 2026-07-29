@@ -151,7 +151,22 @@ Deno.serve(async request => {
   if (itemsError) return jsonResponse({ error: itemsError.message }, 500)
   const items = (data ?? []) as unknown as LicenseItem[]
 
+  const { data: qualityRules, error: qualityRulesError } = await supabase
+    .from('cmdb_quality_rule_settings')
+    .select('issue_code,enabled,severity')
+  const qualityRuleMap = new Map(
+    (qualityRules ?? []).map(rule => [rule.issue_code, rule as {
+      issue_code: string
+      enabled: boolean
+      severity: QualityIssue['severity']
+    }]),
+  )
   const detectedIssues = items.flatMap(validateLicense)
+    .filter(issue => qualityRulesError || qualityRuleMap.get(issue.issue_code)?.enabled !== false)
+    .map(issue => ({
+      ...issue,
+      severity: qualityRuleMap.get(issue.issue_code)?.severity ?? issue.severity,
+    }))
   const { data: openIssues } = await supabase
     .from('cmdb_data_quality_issues').select('id,item_id,issue_code').is('resolved_at', null)
   const detectedKeys = new Set(detectedIssues.map(issue => `${issue.item_id}:${issue.issue_code}`))

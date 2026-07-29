@@ -121,6 +121,14 @@ directas desde la API. Un trabajo diario elimina eventos mayores a 15 días.
 | `20260801_add_expiration_email_alerts.sql` | Correos, entregas y calidad de datos. |
 | `20260802_add_admin_audit_logs.sql` | Auditoría administrativa y retención. |
 | `20260803_add_granular_access_control.sql` | Superuser, permisos y alcance por categorías. |
+| `20260804_add_quality_rules_and_data_transfer.sql` | Reglas de calidad, transferencia y Realtime. |
+
+## Carga diferida
+
+`App.tsx` separa login y dashboard mediante `React.lazy`. El módulo de
+importación/exportación también se descarga únicamente cuando el usuario abre
+la herramienta. Esto reduce el JavaScript inicial del dashboard y evita cargar
+los efectos visuales del login durante una sesión activa.
 
 ## Estado de navegación local
 

@@ -5,6 +5,8 @@
   scopes. Existing admins keep their current capabilities by default.
 */
 
+BEGIN;
+
 ALTER TABLE public.cmdb_user_roles
   DROP CONSTRAINT IF EXISTS cmdb_user_roles_role_check;
 
@@ -31,7 +33,8 @@ CREATE TABLE IF NOT EXISTS public.cmdb_user_permissions (
     'records.view', 'records.create', 'records.edit', 'records.delete',
     'credentials.view', 'credentials.edit', 'history.view',
     'alerts.view', 'alerts.configure', 'quality.view',
-    'audit.view', 'roles.manage', 'permissions.manage'
+    'quality.configure', 'audit.view', 'roles.manage', 'permissions.manage',
+    'data.transfer'
   )),
   allowed boolean NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -172,6 +175,10 @@ DROP POLICY IF EXISTS "Users can read their role and admins can read all roles" 
 DROP POLICY IF EXISTS "Admins can insert roles" ON public.cmdb_user_roles;
 DROP POLICY IF EXISTS "Admins can update roles" ON public.cmdb_user_roles;
 DROP POLICY IF EXISTS "Admins can delete roles" ON public.cmdb_user_roles;
+DROP POLICY IF EXISTS "Users read own role or manage access" ON public.cmdb_user_roles;
+DROP POLICY IF EXISTS "Role managers insert non-superusers" ON public.cmdb_user_roles;
+DROP POLICY IF EXISTS "Role managers update non-superusers" ON public.cmdb_user_roles;
+DROP POLICY IF EXISTS "Role managers delete non-superusers" ON public.cmdb_user_roles;
 
 CREATE POLICY "Users read own role or manage access"
   ON public.cmdb_user_roles FOR SELECT TO authenticated
@@ -209,6 +216,10 @@ CREATE POLICY "Role managers delete non-superusers"
 
 -- Permission tables: users read their own access; permission managers read and
 -- change non-superuser access. Only a superuser may affect another superuser.
+DROP POLICY IF EXISTS "Read own permissions or manage access" ON public.cmdb_user_permissions;
+DROP POLICY IF EXISTS "Permission managers insert permissions" ON public.cmdb_user_permissions;
+DROP POLICY IF EXISTS "Permission managers update permissions" ON public.cmdb_user_permissions;
+DROP POLICY IF EXISTS "Permission managers delete permissions" ON public.cmdb_user_permissions;
 CREATE POLICY "Read own permissions or manage access"
   ON public.cmdb_user_permissions FOR SELECT TO authenticated
   USING (
@@ -250,6 +261,10 @@ CREATE POLICY "Permission managers delete permissions"
     )
   );
 
+DROP POLICY IF EXISTS "Read own categories or manage access" ON public.cmdb_user_category_access;
+DROP POLICY IF EXISTS "Permission managers insert categories" ON public.cmdb_user_category_access;
+DROP POLICY IF EXISTS "Permission managers update categories" ON public.cmdb_user_category_access;
+DROP POLICY IF EXISTS "Permission managers delete categories" ON public.cmdb_user_category_access;
 CREATE POLICY "Read own categories or manage access"
   ON public.cmdb_user_category_access FOR SELECT TO authenticated
   USING (
@@ -296,6 +311,10 @@ DROP POLICY IF EXISTS "Authenticated users can read clients" ON public.cmdb_clie
 DROP POLICY IF EXISTS "Admins can insert clients" ON public.cmdb_clients;
 DROP POLICY IF EXISTS "Admins can update clients" ON public.cmdb_clients;
 DROP POLICY IF EXISTS "Admins can delete clients" ON public.cmdb_clients;
+DROP POLICY IF EXISTS "Permitted users read clients" ON public.cmdb_clients;
+DROP POLICY IF EXISTS "Permitted users insert clients" ON public.cmdb_clients;
+DROP POLICY IF EXISTS "Permitted users update clients" ON public.cmdb_clients;
+DROP POLICY IF EXISTS "Permitted users delete clients" ON public.cmdb_clients;
 CREATE POLICY "Permitted users read clients" ON public.cmdb_clients FOR SELECT TO authenticated
   USING (public.cmdb_has_permission('records.view'));
 CREATE POLICY "Permitted users insert clients" ON public.cmdb_clients FOR INSERT TO authenticated
@@ -309,6 +328,10 @@ DROP POLICY IF EXISTS "Authenticated users can read items" ON public.cmdb_items;
 DROP POLICY IF EXISTS "Admins can insert items" ON public.cmdb_items;
 DROP POLICY IF EXISTS "Admins can update items" ON public.cmdb_items;
 DROP POLICY IF EXISTS "Admins can delete items" ON public.cmdb_items;
+DROP POLICY IF EXISTS "Permitted users read items" ON public.cmdb_items;
+DROP POLICY IF EXISTS "Permitted users insert items" ON public.cmdb_items;
+DROP POLICY IF EXISTS "Permitted users update items" ON public.cmdb_items;
+DROP POLICY IF EXISTS "Permitted users delete items" ON public.cmdb_items;
 CREATE POLICY "Permitted users read items" ON public.cmdb_items FOR SELECT TO authenticated
   USING (public.cmdb_can_view_category(category));
 CREATE POLICY "Permitted users insert items" ON public.cmdb_items FOR INSERT TO authenticated
@@ -321,6 +344,8 @@ CREATE POLICY "Permitted users delete items" ON public.cmdb_items FOR DELETE TO 
 DROP POLICY IF EXISTS "Authenticated users can read item history" ON public.cmdb_item_history;
 DROP POLICY IF EXISTS "Admins can insert item history" ON public.cmdb_item_history;
 DROP POLICY IF EXISTS "Admins can delete item history" ON public.cmdb_item_history;
+DROP POLICY IF EXISTS "Permitted users read item history" ON public.cmdb_item_history;
+DROP POLICY IF EXISTS "Permitted users insert item history" ON public.cmdb_item_history;
 CREATE POLICY "Permitted users read item history" ON public.cmdb_item_history FOR SELECT TO authenticated
   USING (public.cmdb_has_permission('history.view'));
 CREATE POLICY "Permitted users insert item history" ON public.cmdb_item_history FOR INSERT TO authenticated
@@ -328,6 +353,8 @@ CREATE POLICY "Permitted users insert item history" ON public.cmdb_item_history 
 
 DROP POLICY IF EXISTS "Admins can read alert settings" ON public.cmdb_alert_settings;
 DROP POLICY IF EXISTS "Admins can update alert settings" ON public.cmdb_alert_settings;
+DROP POLICY IF EXISTS "Permitted users read alert settings" ON public.cmdb_alert_settings;
+DROP POLICY IF EXISTS "Permitted users update alert settings" ON public.cmdb_alert_settings;
 CREATE POLICY "Permitted users read alert settings" ON public.cmdb_alert_settings FOR SELECT TO authenticated
   USING (public.cmdb_has_permission('alerts.configure'));
 CREATE POLICY "Permitted users update alert settings" ON public.cmdb_alert_settings FOR UPDATE TO authenticated
@@ -335,11 +362,14 @@ CREATE POLICY "Permitted users update alert settings" ON public.cmdb_alert_setti
   WITH CHECK (public.cmdb_has_permission('alerts.configure'));
 
 DROP POLICY IF EXISTS "Admins can read notification history" ON public.cmdb_expiration_notifications;
+DROP POLICY IF EXISTS "Permitted users read notification history" ON public.cmdb_expiration_notifications;
 CREATE POLICY "Permitted users read notification history" ON public.cmdb_expiration_notifications FOR SELECT TO authenticated
   USING (public.cmdb_has_permission('alerts.view'));
 
 DROP POLICY IF EXISTS "Authenticated users can read quality issues" ON public.cmdb_data_quality_issues;
 DROP POLICY IF EXISTS "Admins can update quality issues" ON public.cmdb_data_quality_issues;
+DROP POLICY IF EXISTS "Permitted users read quality issues" ON public.cmdb_data_quality_issues;
+DROP POLICY IF EXISTS "Permitted users update quality issues" ON public.cmdb_data_quality_issues;
 CREATE POLICY "Permitted users read quality issues" ON public.cmdb_data_quality_issues FOR SELECT TO authenticated
   USING (public.cmdb_has_permission('quality.view'));
 CREATE POLICY "Permitted users update quality issues" ON public.cmdb_data_quality_issues FOR UPDATE TO authenticated
@@ -347,6 +377,7 @@ CREATE POLICY "Permitted users update quality issues" ON public.cmdb_data_qualit
   WITH CHECK (public.cmdb_has_permission('quality.view'));
 
 DROP POLICY IF EXISTS "Admins can read audit logs" ON public.cmdb_audit_logs;
+DROP POLICY IF EXISTS "Permitted users read audit logs" ON public.cmdb_audit_logs;
 CREATE POLICY "Permitted users read audit logs" ON public.cmdb_audit_logs FOR SELECT TO authenticated
   USING (public.cmdb_has_permission('audit.view'));
 
@@ -453,3 +484,5 @@ BEFORE UPDATE OF role OR DELETE ON public.cmdb_user_roles
 FOR EACH ROW EXECUTE FUNCTION public.preserve_last_cmdb_admin();
 
 REVOKE ALL ON FUNCTION public.preserve_last_cmdb_admin() FROM PUBLIC, anon, authenticated;
+
+COMMIT;
