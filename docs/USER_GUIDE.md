@@ -94,10 +94,12 @@ proceso de alertas después de corregir el registro.
 
 Configura activación, remitente, destinatarios y umbrales.
 
-### Roles
+### Access Control
 
-Agrega usuarios, cambia entre `admin` y `viewer`, o elimina asignaciones. El
-sistema no permite eliminar ni degradar al último administrador.
+El superuser puede asignar roles, conceder permisos funcionales y definir qué
+categorías puede ver o editar cada usuario. Puede permitir que otra cuenta
+administre permisos, pero sólo un superuser puede modificar superusers. El
+sistema no permite eliminar ni degradar al último superuser.
 
 ### Audit logs
 
@@ -120,4 +122,3 @@ En teléfonos:
 
 Los iconos del encabezado incluyen una descripción accesible y un título para
 identificar su función.
-

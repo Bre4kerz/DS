@@ -14,11 +14,24 @@ const CMDB_ITEM_SELECT = `
   process_updated_at, updated_by, created_at, updated_at, has_credentials
 `
 
+export const CMDB_PERMISSION_KEYS = [
+  'records.view', 'records.create', 'records.edit', 'records.delete',
+  'credentials.view', 'credentials.edit', 'history.view',
+  'alerts.view', 'alerts.configure', 'quality.view',
+  'audit.view', 'roles.manage', 'permissions.manage',
+] as const
+
+export type CmdbPermission = typeof CMDB_PERMISSION_KEYS[number]
+type CmdbRole = 'superuser' | 'admin' | 'viewer'
+
 export function useCmdbData(user: User | null) {
   const [clients, setClients] = useState<ClientWithItems[]>([])
   const [allItems, setAllItems] = useState<CmdbItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [userRole, setUserRole] = useState<'admin' | 'viewer'>('viewer')
+  const [userRole, setUserRole] = useState<CmdbRole>('viewer')
+  const [permissions, setPermissions] = useState<Set<CmdbPermission>>(
+    new Set(['records.view', 'history.view', 'alerts.view', 'quality.view']),
+  )
   const [history, setHistory] = useState<ItemHistory[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [allRoles, setAllRoles] = useState<UserRole[]>([])
@@ -63,8 +76,25 @@ export function useCmdbData(user: User | null) {
     if (!user?.email) return
     supabase.from('cmdb_user_roles').select('*').eq('user_email', user.email).maybeSingle()
       .then(({ data }) => {
-        if (data) setUserRole(data.role as 'admin' | 'viewer')
-        else setUserRole('viewer')
+        const role = data?.role as CmdbRole | undefined
+        setUserRole(role ?? 'viewer')
+        const defaults = role === 'superuser'
+          ? CMDB_PERMISSION_KEYS
+          : role === 'admin'
+            ? CMDB_PERMISSION_KEYS.filter(permission => permission !== 'permissions.manage')
+            : ['records.view', 'history.view', 'alerts.view', 'quality.view'] as CmdbPermission[]
+        Promise.all(CMDB_PERMISSION_KEYS.map(async permission => {
+          const { data: allowed, error } = await supabase.rpc('cmdb_has_permission', {
+            p_permission: permission,
+          })
+          return { permission, allowed: allowed === true, failed: Boolean(error) }
+        })).then(results => {
+          const rpcAvailable = results.some(result => !result.failed)
+          const resolved = results
+            .filter(result => !result.failed && result.allowed)
+            .map(result => result.permission)
+          setPermissions(new Set(rpcAvailable ? resolved : defaults))
+        })
       })
   }, [user])
 
@@ -118,7 +148,7 @@ export function useCmdbData(user: User | null) {
     return data as UserRole[] ?? []
   }, [])
 
-  const saveRole = useCallback(async (email: string, role: 'admin' | 'viewer') => {
+  const saveRole = useCallback(async (email: string, role: CmdbRole) => {
     const { error } = await supabase.from('cmdb_user_roles').upsert({ user_email: email, role }, { onConflict: 'user_email' })
     if (error) throw error
     if (email.toLowerCase() === user?.email?.toLowerCase()) setUserRole(role)
@@ -136,6 +166,8 @@ export function useCmdbData(user: User | null) {
     allItems, setAllItems,
     loading,
     userRole,
+    permissions,
+    hasPermission: (permission: CmdbPermission) => permissions.has(permission),
     history, loadingHistory, setHistory, setLoadingHistory,
     allRoles, setAllRoles,
     fetchData,

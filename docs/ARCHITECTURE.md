@@ -61,8 +61,15 @@ Las contraseñas no forman parte de esta tabla.
 
 ### `cmdb_user_roles`
 
-Asocia usuarios con `admin` o `viewer`. La función `is_cmdb_admin()` es utilizada
-por las políticas RLS y funciones protegidas.
+Asocia usuarios con `superuser`, `admin` o `viewer`.
+
+### Permisos y categorías
+
+- `cmdb_user_permissions`: overrides funcionales por usuario/rol.
+- `cmdb_user_category_access`: visibilidad y edición por categoría.
+
+Las funciones `cmdb_has_permission()`, `cmdb_can_view_category()` y
+`cmdb_can_edit_category()` son utilizadas por RLS.
 
 ### `cmdb_item_credentials`
 
@@ -113,6 +120,7 @@ directas desde la API. Un trabajo diario elimina eventos mayores a 15 días.
 | `20260731_add_license_quantity.sql` | Cantidad de licencias. |
 | `20260801_add_expiration_email_alerts.sql` | Correos, entregas y calidad de datos. |
 | `20260802_add_admin_audit_logs.sql` | Auditoría administrativa y retención. |
+| `20260803_add_granular_access_control.sql` | Superuser, permisos y alcance por categorías. |
 
 ## Estado de navegación local
 
@@ -133,4 +141,3 @@ No se guardan contraseñas, credenciales reveladas ni formularios de edición.
 - `No date`: fecha inexistente o inválida.
 
 El cálculo utiliza días calendario para evitar desfases por zona horaria.
-

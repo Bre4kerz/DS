@@ -14,7 +14,7 @@ import {
   hasCredentials, revealCredentials, Credentials
 } from '../lib/supabase'
 import ItemModal from './ItemModal'
-import { useCmdbData } from '../hooks/useCmdbData'
+import { CMDB_PERMISSION_KEYS, useCmdbData, type CmdbPermission } from '../hooks/useCmdbData'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'Servers': <Server size={18} />,
@@ -46,6 +46,23 @@ type DashboardNavigationState = {
 }
 
 type ThemeMode = 'dark' | 'light'
+type CmdbRole = 'superuser' | 'admin' | 'viewer'
+
+const PERMISSION_LABELS: Record<CmdbPermission, string> = {
+  'records.view': 'View records',
+  'records.create': 'Create records',
+  'records.edit': 'Edit records',
+  'records.delete': 'Delete records',
+  'credentials.view': 'View credentials',
+  'credentials.edit': 'Edit credentials',
+  'history.view': 'View history',
+  'alerts.view': 'View alerts',
+  'alerts.configure': 'Configure alerts',
+  'quality.view': 'View data quality',
+  'audit.view': 'View audit logs',
+  'roles.manage': 'Manage roles',
+  'permissions.manage': 'Manage permissions',
+}
 
 const getDashboardStateKey = (userId: string) => `cmdb-dashboard-state:${userId}`
 
@@ -265,10 +282,13 @@ function SecureCredentialsPanel({ itemId }: { itemId: string }) {
   )
 }
 
-function SectionCard({ section, defaultOpen = false, isAdmin = true, highlightedItemId, onEdit, onDelete, onDuplicate, onHistory }: {
+function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete = false, canViewCredentials = false, canViewHistory = false, highlightedItemId, onEdit, onDelete, onDuplicate, onHistory }: {
   section: SectionData
   defaultOpen?: boolean
-  isAdmin?: boolean
+  canEdit?: boolean
+  canDelete?: boolean
+  canViewCredentials?: boolean
+  canViewHistory?: boolean
   highlightedItemId?: string | null
   onEdit: (item: CmdbItem) => void
   onDelete: (id: string) => void
@@ -280,7 +300,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
   const hasExpiring = section.rows.some(r => r.status === 'Expiring' || r.status === 'Expired')
-  const hasCreds = isAdmin && section.rows.some(r => hasCredentials(r.item))
+  const hasCreds = canViewCredentials && section.rows.some(r => hasCredentials(r.item))
 
   const sortedRows = [...section.rows].sort((a, b) => {
     switch (sortBy) {
@@ -378,7 +398,7 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
               <tbody>
                 {sortedRows.map((row, idx) => {
                   const isExpanded = expandedRows.has(row.id)
-                  const creds = isAdmin && hasCredentials(row.item)
+                  const creds = canViewCredentials && hasCredentials(row.item)
                   const isHighlighted = highlightedItemId === row.id
 
                   return (
@@ -463,14 +483,16 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                             className="flex items-center justify-end gap-1"
                             onClick={event => event.stopPropagation()}
                           >
-                            <button
-                              onClick={() => onHistory(row.item)}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-all"
-                              title="History"
-                            >
-                              <History size={13} />
-                            </button>
-                            {isAdmin && (
+                            {canViewHistory && (
+                              <button
+                                onClick={() => onHistory(row.item)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-all"
+                                title="History"
+                              >
+                                <History size={13} />
+                              </button>
+                            )}
+                            {canEdit && (
                               <>
                                 <button
                                   onClick={() => onDuplicate(row.item)}
@@ -486,13 +508,15 @@ function SectionCard({ section, defaultOpen = false, isAdmin = true, highlighted
                                 >
                                   <Pencil size={13} />
                                 </button>
-                                <button
-                                  onClick={() => onDelete(row.id)}
-                                  className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                                  title="Delete"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
+                                {canDelete && (
+                                  <button
+                                    onClick={() => onDelete(row.id)}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
@@ -553,6 +577,7 @@ export default function DashboardCMDB() {
     allItems,
     loading,
     userRole,
+    hasPermission,
     history,
     loadingHistory,
     allRoles,
@@ -582,6 +607,8 @@ export default function DashboardCMDB() {
   const [categoryFilter, setCategoryFilter] = useState<string>(restoredNavigation?.categoryFilter ?? 'All')
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
   const [rolesModal, setRolesModal] = useState(false)
+  const [rolePermissions, setRolePermissions] = useState<Record<string, Set<CmdbPermission>>>({})
+  const [roleCategoryAccess, setRoleCategoryAccess] = useState<Record<string, Record<string, { view: boolean; edit: boolean }>>>({})
   const [auditLogsModal, setAuditLogsModal] = useState(false)
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false)
@@ -601,11 +628,11 @@ export default function DashboardCMDB() {
   const [savingAlertSettings, setSavingAlertSettings] = useState(false)
   const [alertSettingsMessage, setAlertSettingsMessage] = useState('')
   const [newRoleEmail, setNewRoleEmail] = useState('')
-  const [newRoleValue, setNewRoleValue] = useState<'admin' | 'viewer'>('viewer')
+  const [newRoleValue, setNewRoleValue] = useState<CmdbRole>('viewer')
   const [roleError, setRoleError] = useState('')
   const [savingRoleEmail, setSavingRoleEmail] = useState<string | null>(null)
   const [pendingRoleAction, setPendingRoleAction] = useState<
-    | { type: 'change'; email: string; role: 'admin' | 'viewer' }
+    | { type: 'change'; email: string; role: CmdbRole }
     | { type: 'delete'; email: string }
     | null
   >(null)
@@ -756,8 +783,99 @@ export default function DashboardCMDB() {
   }
 
   const fetchRoles = async () => {
-    await loadRoles()
+    const roles = await loadRoles()
+    if (hasPermission('permissions.manage') && roles.length > 0) {
+      const { data } = await supabase
+        .from('cmdb_user_permissions')
+        .select('role_id,permission_key,allowed')
+        .in('role_id', roles.map(role => role.id))
+      const next: Record<string, Set<CmdbPermission>> = {}
+      for (const role of roles) {
+        const defaults = role.role === 'superuser'
+          ? CMDB_PERMISSION_KEYS
+          : role.role === 'admin'
+            ? CMDB_PERMISSION_KEYS.filter(permission => permission !== 'permissions.manage')
+            : ['records.view', 'history.view', 'alerts.view', 'quality.view'] as CmdbPermission[]
+        next[role.id] = new Set(defaults)
+      }
+      for (const row of data ?? []) {
+        const permission = row.permission_key as CmdbPermission
+        if (row.allowed) next[row.role_id]?.add(permission)
+        else next[row.role_id]?.delete(permission)
+      }
+      setRolePermissions(next)
+
+      const { data: categoryRows } = await supabase
+        .from('cmdb_user_category_access')
+        .select('role_id,category,can_view,can_edit')
+        .in('role_id', roles.map(role => role.id))
+      const categoryAccess: Record<string, Record<string, { view: boolean; edit: boolean }>> = {}
+      for (const row of categoryRows ?? []) {
+        categoryAccess[row.role_id] ??= {}
+        categoryAccess[row.role_id][row.category] = { view: row.can_view, edit: row.can_edit }
+      }
+      setRoleCategoryAccess(categoryAccess)
+    }
     setRolesModal(true)
+  }
+
+  const toggleRolePermission = async (roleId: string, permission: CmdbPermission, allowed: boolean) => {
+    setRoleError('')
+    const previous = rolePermissions[roleId] ?? new Set<CmdbPermission>()
+    setRolePermissions(current => ({
+      ...current,
+      [roleId]: new Set(
+        allowed ? [...previous, permission] : [...previous].filter(value => value !== permission),
+      ),
+    }))
+    const { error } = await supabase.from('cmdb_user_permissions').upsert({
+      role_id: roleId,
+      permission_key: permission,
+      allowed,
+      updated_at: new Date().toISOString(),
+      updated_by: user?.id ?? null,
+    }, { onConflict: 'role_id,permission_key' })
+    if (error) {
+      setRoleError(error.message)
+      await fetchRoles()
+    }
+  }
+
+  const toggleCategoryAccess = async (
+    roleId: string,
+    category: string,
+    field: 'view' | 'edit',
+    allowed: boolean,
+  ) => {
+    const role = allRoles.find(candidate => candidate.id === roleId)
+    if (!role) return
+    const current = roleCategoryAccess[roleId] ?? {}
+    const defaultEdit = rolePermissions[roleId]?.has('records.edit') ?? role.role === 'admin'
+    const next = Object.fromEntries(categories.map(name => [
+      name,
+      current[name] ?? { view: true, edit: defaultEdit },
+    ]))
+    next[category] = {
+      ...next[category],
+      [field]: allowed,
+      ...(field === 'view' && !allowed ? { edit: false } : {}),
+    }
+    setRoleCategoryAccess(value => ({ ...value, [roleId]: next }))
+    const { error } = await supabase.from('cmdb_user_category_access').upsert(
+      Object.entries(next).map(([name, access]) => ({
+        role_id: roleId,
+        category: name,
+        can_view: access.view,
+        can_edit: access.edit,
+        updated_at: new Date().toISOString(),
+        updated_by: user?.id ?? null,
+      })),
+      { onConflict: 'role_id,category' },
+    )
+    if (error) {
+      setRoleError(error.message)
+      await fetchRoles()
+    }
   }
 
   const fetchAuditLogs = async () => {
@@ -860,7 +978,7 @@ export default function DashboardCMDB() {
     }
   }
 
-  const changeRole = async (email: string, role: 'admin' | 'viewer') => {
+  const changeRole = async (email: string, role: CmdbRole) => {
     setRoleError('')
     setSavingRoleEmail(email)
     try {
@@ -989,7 +1107,7 @@ export default function DashboardCMDB() {
       .filter(item => item.category === 'Licenses' && item.item_type)
       .map(item => item.item_type)
   )].sort()
-  const adminRoleCount = allRoles.filter(role => role.role === 'admin').length
+  const superuserCount = allRoles.filter(role => role.role === 'superuser').length
 
   useEffect(() => {
     if (!loading) fetchQualityIssues()
@@ -1015,40 +1133,40 @@ export default function DashboardCMDB() {
             >
               <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             </button>
-            {userRole === 'admin' && (
+            {(hasPermission('alerts.configure') || hasPermission('roles.manage') || hasPermission('audit.view') || hasPermission('records.create')) && (
               <>
-                <button
+                {hasPermission('alerts.configure') && <button
                   onClick={openAlertSettings}
                   className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-colors"
                   title="Configure email alerts"
                 >
                   <Calendar size={14} />
                   <span className="hidden md:inline">Email alerts</span>
-                </button>
-                <button
+                </button>}
+                {hasPermission('roles.manage') && <button
                   onClick={fetchRoles}
                   className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
                   title="Manage roles"
                 >
                   <Users size={14} />
-                  <span className="hidden md:inline">Roles</span>
-                </button>
-                <button
+                  <span className="hidden md:inline">{hasPermission('permissions.manage') ? 'Access' : 'Roles'}</span>
+                </button>}
+                {hasPermission('audit.view') && <button
                   onClick={fetchAuditLogs}
                   className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
                   title="Review activity logs"
                 >
                   <ClipboardList size={14} />
                   <span className="hidden md:inline">Audit logs</span>
-                </button>
-                <button
+                </button>}
+                {hasPermission('records.create') && <button
                   onClick={() => { setEditItem(null); setModalOpen(true) }}
                   className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 p-2.5 sm:px-4 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
                   title="New record"
                 >
                   <Plus size={14} />
                   <span className="hidden sm:inline">New record</span>
-                </button>
+                </button>}
               </>
             )}
             <button
@@ -1122,7 +1240,7 @@ export default function DashboardCMDB() {
                 <p className="text-xs text-slate-400">Total Items</p>
                 <p className="mt-1 text-2xl font-bold">{globalStats.total}</p>
               </button>
-              <button
+              {hasPermission('quality.view') && <button
                 onClick={() => fetchQualityIssues(true)}
                 className={`col-span-2 rounded-2xl border p-4 text-left transition-colors ${
                   qualityIssues.length > 0
@@ -1134,7 +1252,7 @@ export default function DashboardCMDB() {
                 <p className={`mt-1 text-2xl font-bold ${qualityIssues.length > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
                   {qualityIssues.length}
                 </p>
-              </button>
+              </button>}
 
             </div>
 
@@ -1195,20 +1313,20 @@ export default function DashboardCMDB() {
                             )}
                           </div>
                           <div className="flex items-center gap-0.5 opacity-40 hover:opacity-100 transition-opacity">
-                            <button
+                            {hasPermission('records.edit') && <button
                               onClick={(e) => { e.stopPropagation(); handleEditClient(client) }}
                               className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-all"
                               title="Edit cliente"
                             >
                               <Pencil size={12} />
-                            </button>
-                            <button
+                            </button>}
+                            {hasPermission('records.delete') && <button
                               onClick={(e) => { e.stopPropagation(); setDeleteConfirm(`client:${client.id}`) }}
                               className="p-1.5 rounded-lg hover:bg-red-600/80 text-slate-400 hover:text-white transition-all"
                               title="Delete cliente"
                             >
                               <Trash2 size={12} />
-                            </button>
+                            </button>}
                           </div>
                         </div>
                       </div>
@@ -1223,7 +1341,7 @@ export default function DashboardCMDB() {
           <main className="min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
             {/* Expiration alerts - always visible */}
      
-            {!loading && (
+            {!loading && hasPermission('alerts.view') && (
   <div className="rounded-2xl border border-amber-500/15 bg-[#0a1220] overflow-hidden">
     {/* ===== HEADER RETRAÍBLE ===== */}
     <button
@@ -1427,7 +1545,10 @@ export default function DashboardCMDB() {
                         section={section}
                         defaultOpen={openSections.has(section.title)}
                         highlightedItemId={highlightedItemId}
-                        isAdmin={userRole === 'admin'}
+                        canEdit={hasPermission('records.edit')}
+                        canDelete={hasPermission('records.delete')}
+                        canViewCredentials={hasPermission('credentials.view')}
+                        canViewHistory={hasPermission('history.view')}
                         onEdit={item => {
                           setOpenSections(previous => new Set([...previous, item.category]))
                           setEditItem(item)
@@ -1465,6 +1586,7 @@ export default function DashboardCMDB() {
           clients={clients}
           categories={categories}
           licenseTypes={licenseTypes}
+          canEditCredentials={hasPermission('credentials.edit')}
           onClose={closeItemModal}
           onSaved={handleItemSaved}
         />
@@ -1825,11 +1947,11 @@ export default function DashboardCMDB() {
       {/* Roles Modal */}
       {rolesModal && (
         <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setRolesModal(false)}>
-          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl max-h-[86dvh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Users size={16} className="text-cyan-400" />
-                <h3 className="font-semibold">Role Management</h3>
+                <h3 className="font-semibold">Access Control</h3>
               </div>
               <button onClick={() => setRolesModal(false)} className="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800"><X size={18} /></button>
             </div>
@@ -1847,6 +1969,7 @@ export default function DashboardCMDB() {
                   onChange={e => setNewRoleValue(e.target.value as 'admin' | 'viewer')}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none sm:w-auto"
                 >
+                  {userRole === 'superuser' && <option value="superuser">Superuser</option>}
                   <option value="admin">Admin</option>
                   <option value="viewer">Viewer</option>
                 </select>
@@ -1867,38 +1990,94 @@ export default function DashboardCMDB() {
                 <p className="text-center text-slate-500 text-sm py-6">No roles configured</p>
               ) : (
                 allRoles.map(r => (
-                  <div key={r.id} className="flex flex-col items-stretch gap-3 rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium" title={r.user_email}>{r.user_email}</p>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 sm:justify-end">
+                  <div key={r.id} className="rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3">
+                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium" title={r.user_email}>{r.user_email}</p>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 sm:justify-end">
                       <select
                         value={r.role}
                         onChange={event => setPendingRoleAction({
                           type: 'change',
                           email: r.user_email,
-                          role: event.target.value as 'admin' | 'viewer',
+                          role: event.target.value as CmdbRole,
                         })}
-                        disabled={savingRoleEmail !== null}
+                        disabled={savingRoleEmail !== null || (r.role === 'superuser' && (userRole !== 'superuser' || superuserCount === 1))}
                         className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none disabled:opacity-50"
                         aria-label={`Role for ${r.user_email}`}
                       >
+                        {userRole === 'superuser' && <option value="superuser">Superuser</option>}
                         <option value="admin">Admin</option>
-                        <option value="viewer" disabled={r.role === 'admin' && adminRoleCount === 1}>
-                          Viewer
-                        </option>
+                        <option value="viewer">Viewer</option>
                       </select>
                       {r.user_email !== user?.email && (
                       <button
                         onClick={() => setPendingRoleAction({ type: 'delete', email: r.user_email })}
-                        disabled={savingRoleEmail !== null || (r.role === 'admin' && adminRoleCount === 1)}
-                        title={r.role === 'admin' && adminRoleCount === 1 ? 'At least one admin is required' : 'Delete role'}
+                        disabled={savingRoleEmail !== null || r.role === 'superuser'}
+                        title={r.role === 'superuser' ? 'Superusers cannot be deleted here' : 'Delete role'}
                         className="text-slate-500 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs px-2 py-1 rounded-lg hover:bg-rose-500/10"
                       >
                         Delete
                       </button>
                       )}
+                      </div>
                     </div>
+                    {hasPermission('permissions.manage') && (
+                      <div className="mt-3 space-y-4 border-t border-slate-700/50 pt-3">
+                        <div>
+                          <p className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">Functional permissions</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {CMDB_PERMISSION_KEYS.map(permission => (
+                              <label key={permission} className="flex items-center gap-2 text-xs text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  checked={r.role === 'superuser' || rolePermissions[r.id]?.has(permission) || false}
+                                  disabled={r.role === 'superuser'}
+                                  onChange={event => toggleRolePermission(r.id, permission, event.target.checked)}
+                                  className="h-4 w-4 accent-cyan-500"
+                                />
+                                {PERMISSION_LABELS[permission]}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        {r.role !== 'superuser' && (
+                          <div>
+                            <div className="mb-2 grid grid-cols-[1fr_44px_44px] gap-2 text-[10px] uppercase tracking-wide text-slate-500">
+                              <span>Category scope</span><span>View</span><span>Edit</span>
+                            </div>
+                            <div className="space-y-1.5">
+                              {categories.map(category => {
+                                const access = roleCategoryAccess[r.id]?.[category]
+                                const canView = access?.view ?? true
+                                const canEdit = access?.edit ?? (rolePermissions[r.id]?.has('records.edit') || false)
+                                return (
+                                  <div key={category} className="grid grid-cols-[1fr_44px_44px] items-center gap-2 rounded-lg bg-slate-900/50 px-2 py-1.5">
+                                    <span className="truncate text-xs text-slate-300">{category}</span>
+                                    <input
+                                      type="checkbox"
+                                      checked={canView}
+                                      onChange={event => toggleCategoryAccess(r.id, category, 'view', event.target.checked)}
+                                      className="h-4 w-4 accent-cyan-500"
+                                      aria-label={`View ${category}`}
+                                    />
+                                    <input
+                                      type="checkbox"
+                                      checked={canView && canEdit}
+                                      disabled={!canView}
+                                      onChange={event => toggleCategoryAccess(r.id, category, 'edit', event.target.checked)}
+                                      className="h-4 w-4 accent-cyan-500 disabled:opacity-30"
+                                      aria-label={`Edit ${category}`}
+                                    />
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))
               )}

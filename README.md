@@ -9,7 +9,7 @@ credenciales protegidas y alertas de vencimiento.
 - Licencias con tipo, proveedor, sucursal, cantidad, serial y vencimiento.
 - Alertas visuales y correos programados de expiración.
 - Registro de problemas de calidad de datos.
-- Roles `admin` y `viewer` aplicados mediante RLS en PostgreSQL.
+- Roles `superuser`, `admin` y `viewer`, permisos granulares y alcance por categoría.
 - Credenciales cifradas con Supabase Vault y revelado exclusivo para admins.
 - Historial por ítem y panel administrativo de auditoría.
 - Cierre de sesión tras 15 minutos de inactividad.
@@ -84,17 +84,18 @@ Para una instalación existente, la migración más reciente es:
 20260802_add_admin_audit_logs.sql
 ```
 
-## Roles
+## Acceso y permisos
 
-- `viewer`: puede consultar clientes, ítems y problemas de calidad.
-- `admin`: además puede crear, editar, borrar, administrar roles, consultar
-  credenciales, configurar alertas y revisar auditoría.
+- `superuser`: acceso completo y administración del panel de permisos.
+- `admin`: conserva las capacidades administrativas, excepto administrar
+  permisos, salvo que un superuser se lo conceda.
+- `viewer`: lectura básica configurable.
 
 La autorización real se aplica en PostgreSQL mediante RLS. Ocultar un botón en
 React no concede ni revoca permisos.
 
-Debe existir al menos un administrador. Un trigger impide eliminar o degradar al
-último admin.
+Debe existir al menos un superuser. Un trigger impide eliminar o degradar al
+último.
 
 ## Documentación
 

@@ -28,6 +28,12 @@ auditoría.
 
 ## Autorización
 
+### Superuser
+
+Tiene acceso completo. Puede conceder el panel de permisos a otros usuarios y
+es la única cuenta que puede crear o modificar superusers. Siempre debe existir
+al menos uno.
+
 ### Viewer
 
 Puede leer los datos operativos permitidos por RLS. No puede modificar clientes,
@@ -35,13 +41,13 @@ Puede leer los datos operativos permitidos por RLS. No puede modificar clientes,
 
 ### Admin
 
-Puede administrar la CMDB y utilizar RPC protegidas. La función
-`is_cmdb_admin()` evalúa UUID y correo del JWT.
+Conserva permisos administrativos predeterminados, pero cada capacidad puede
+ser concedida o revocada.
 
-La migración `20260728_preserve_last_cmdb_admin.sql` impide:
+La migración `20260803_add_granular_access_control.sql` impide:
 
-- eliminar al último admin;
-- convertir al último admin en viewer.
+- eliminar al último superuser;
+- degradar al último superuser.
 
 ## Credenciales
 
@@ -118,4 +124,3 @@ Si una credencial o clave se expone:
 4. Determina qué usuarios o sistemas tuvieron acceso.
 5. Elimina el secreto de archivos e historial de Git.
 6. Documenta la causa y agrega una prevención verificable.
-

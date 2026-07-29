@@ -31,6 +31,7 @@ type Props = {
   clients: CmdbClient[]
   categories: string[]
   licenseTypes: string[]
+  canEditCredentials: boolean
   onClose: () => void
   onSaved: (savedItem: { id: string; client_id: string; category: string }) => void
 }
@@ -175,7 +176,7 @@ function CreatableCombobox({
   )
 }
 
-export default function ItemModal({ item, clients, categories, licenseTypes, onClose, onSaved }: Props) {
+export default function ItemModal({ item, clients, categories, licenseTypes, canEditCredentials, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const [form, setForm] = useState<FormData>(EMPTY)
   const [saving, setSaving] = useState(false)
@@ -214,7 +215,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, onC
         cred_password_alt: '',
         cred_notes: '',
       })
-      if (hasCredentials(item)) {
+      if (canEditCredentials && hasCredentials(item)) {
         setLoadingCredentials(true)
         revealCredentials(item.id)
           .then(credentials => {
@@ -235,7 +236,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, onC
     } else {
       setForm(EMPTY)
     }
-  }, [item])
+  }, [item, canEditCredentials])
 
   const set = (k: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => {
@@ -299,7 +300,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, onC
       })
       const { error: itemError } = await supabase.from('cmdb_items').update({ ...payload, updated_by: user?.email ?? '' }).eq('id', item.id)
       if (itemError) throw itemError
-      await saveCredentials(item.id, {
+      if (canEditCredentials) await saveCredentials(item.id, {
         user: cred_user,
         password: cred_password,
         user_alt: cred_user_alt,
@@ -321,7 +322,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, onC
         .select('id')
         .single()
       if (itemError) throw itemError
-      await saveCredentials(newItem.id, {
+      if (canEditCredentials) await saveCredentials(newItem.id, {
         user: cred_user,
         password: cred_password,
         user_alt: cred_user_alt,
@@ -571,7 +572,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, onC
             )}
 
             {/* Credentials Section */}
-            <div className="border-t border-slate-700 pt-4 mt-2">
+            {canEditCredentials && <div className="border-t border-slate-700 pt-4 mt-2">
               <button
                 type="button"
                 onClick={() => setShowCreds(v => !v)}
@@ -620,7 +621,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, onC
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           <div className="flex gap-2 justify-end p-5 border-t border-slate-800 flex-shrink-0">

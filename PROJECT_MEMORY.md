@@ -58,6 +58,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 **Actualización de documentación:** `README.md` es la entrada principal y `docs/` contiene guía de usuario, arquitectura/base de datos, operación/despliegue y seguridad. `.env.example` documenta únicamente las variables públicas requeridas.
 
+**Actualización de acceso granular:** `20260803_add_granular_access_control.sql` añade `superuser`, permisos funcionales y restricciones de visualización/edición por categoría. La migración promueve `bhernandez@josys.com.mx`, protege al último superuser y reemplaza políticas RLS relevantes. El modal de roles se convirtió en **Access Control**. Falta ejecutar esta migración en Supabase antes de desplegar el frontend asociado.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.

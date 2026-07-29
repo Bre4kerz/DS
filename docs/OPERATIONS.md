@@ -6,15 +6,16 @@
 
 1. Crea o invita al usuario desde **Supabase > Authentication > Users**.
 2. Inicia sesión como administrador.
-3. Abre **Roles**.
-4. Registra su correo como `viewer` o `admin`.
+3. Abre **Access Control**.
+4. Registra su correo como `viewer`, `admin` o `superuser`.
+5. Si corresponde, ajusta permisos y categorías.
 
 Los usuarios sin rol se consideran `viewer`.
 
 ### Administrar roles
 
 El panel solicita confirmación antes de cambiar o eliminar un rol. La base de
-datos impide que el sistema quede sin administradores.
+datos impide que el sistema quede sin superusers.
 
 ### Revisar auditoría
 
@@ -203,4 +204,3 @@ desplazamiento y eventos táctiles reinician el temporizador.
 
 Cierra la pestaña y vuelve a abrirla, o limpia los datos del sitio. Los assets
 generados por Vite utilizan hash, pero Safari puede mantener el documento previo.
-

@@ -61,7 +61,7 @@ export type ItemHistory = {
 export type UserRole = {
   id: string
   user_email: string
-  role: 'admin' | 'viewer'
+  role: 'superuser' | 'admin' | 'viewer'
   created_at: string
 }
 
@@ -135,7 +135,7 @@ export function hasCredentials(item: CmdbItem): boolean {
 }
 
 export async function revealCredentials(itemId: string): Promise<Credentials> {
-  const { data, error } = await supabase.rpc('reveal_cmdb_credentials', { p_item_id: itemId }).maybeSingle()
+  const { data, error } = await supabase.rpc('reveal_cmdb_credentials_authorized', { p_item_id: itemId }).maybeSingle()
   if (error) throw error
   const credentials = data as {
     username?: string
@@ -155,7 +155,7 @@ export async function revealCredentials(itemId: string): Promise<Credentials> {
 }
 
 export async function saveCredentials(itemId: string, credentials: Credentials): Promise<void> {
-  const { error } = await supabase.rpc('save_cmdb_credentials', {
+  const { error } = await supabase.rpc('save_cmdb_credentials_authorized', {
     p_item_id: itemId,
     p_username: credentials.user,
     p_password: credentials.password,
