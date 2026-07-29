@@ -653,6 +653,8 @@ export default function DashboardCMDB() {
   const [qualitySearch, setQualitySearch] = useState('')
   const [qualitySeverity, setQualitySeverity] = useState('all')
   const [qualityRules, setQualityRules] = useState<QualityRule[]>([])
+  const [savingQualityRule, setSavingQualityRule] = useState<string | null>(null)
+  const [qualityRuleError, setQualityRuleError] = useState('')
   const [notificationHistoryModal, setNotificationHistoryModal] = useState(false)
   const [notifications, setNotifications] = useState<ExpirationNotification[]>([])
   const [loadingNotifications, setLoadingNotifications] = useState(false)
@@ -966,7 +968,10 @@ export default function DashboardCMDB() {
   }
 
   const toggleQualityRule = async (rule: QualityRule) => {
+    if (savingQualityRule) return
     const enabled = !rule.enabled
+    setSavingQualityRule(rule.issue_code)
+    setQualityRuleError('')
     setQualityRules(current => current.map(candidate =>
       candidate.issue_code === rule.issue_code ? { ...candidate, enabled } : candidate,
     ))
@@ -976,9 +981,10 @@ export default function DashboardCMDB() {
       updated_by: user?.id ?? null,
     }).eq('issue_code', rule.issue_code)
     if (error) {
-      setRoleError(error.message)
+      setQualityRuleError(error.message)
       await fetchQualityIssues()
     }
+    setSavingQualityRule(null)
   }
 
   const fetchNotificationHistory = async () => {
@@ -1114,16 +1120,28 @@ export default function DashboardCMDB() {
     })
   }, [auditLogs, auditSearch, auditEventFilter])
 
+  const visibleQualityIssues = useMemo(() => {
+    const rulesByCode = new Map(qualityRules.map(rule => [rule.issue_code, rule]))
+    return qualityIssues
+      .filter(issue => rulesByCode.get(issue.issue_code)?.enabled !== false)
+      .map(issue => {
+        const configuredSeverity = rulesByCode.get(issue.issue_code)?.severity
+        return configuredSeverity && configuredSeverity !== issue.severity
+          ? { ...issue, severity: configuredSeverity }
+          : issue
+      })
+  }, [qualityIssues, qualityRules])
+
   const filteredQualityIssues = useMemo(() => {
     const query = qualitySearch.trim().toLowerCase()
-    return qualityIssues.filter(issue => {
+    return visibleQualityIssues.filter(issue => {
       if (qualitySeverity !== 'all' && issue.severity !== qualitySeverity) return false
       const item = allItems.find(candidate => candidate.id === issue.item_id)
       const client = clients.find(candidate => candidate.id === item?.client_id)
       return !query || [issue.message, issue.issue_code, item?.name, client?.name]
         .some(value => value?.toLowerCase().includes(query))
     })
-  }, [qualityIssues, qualitySearch, qualitySeverity, allItems, clients])
+  }, [visibleQualityIssues, qualitySearch, qualitySeverity, allItems, clients])
 
   const globalStats = useMemo(() => ({
     clients: clients.length,
@@ -1356,14 +1374,14 @@ export default function DashboardCMDB() {
               {hasPermission('quality.view') && <button
                 onClick={() => fetchQualityIssues(true)}
                 className={`col-span-2 rounded-2xl border p-4 text-left transition-colors ${
-                  qualityIssues.length > 0
+                  visibleQualityIssues.length > 0
                     ? 'border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/15'
                     : 'border-slate-800 bg-slate-900 hover:bg-slate-800'
                 }`}
               >
                 <p className="text-xs text-slate-400">Data Quality Issues</p>
-                <p className={`mt-1 text-2xl font-bold ${qualityIssues.length > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
-                  {qualityIssues.length}
+                <p className={`mt-1 text-2xl font-bold ${visibleQualityIssues.length > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                  {visibleQualityIssues.length}
                 </p>
               </button>}
 
@@ -1965,7 +1983,7 @@ export default function DashboardCMDB() {
             <div className="flex items-center justify-between border-b border-slate-800 p-5">
               <div>
                 <h3 className="font-semibold">Data Quality Issues</h3>
-                <p className="text-xs text-slate-500">{qualityIssues.length} unresolved issue(s)</p>
+                <p className="text-xs text-slate-500">{visibleQualityIssues.length} unresolved issue(s)</p>
               </div>
               <button onClick={() => setQualityIssuesModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
             </div>
@@ -1994,10 +2012,19 @@ export default function DashboardCMDB() {
                   {qualityRules.map(rule => (
                     <label key={rule.issue_code} className="flex items-center justify-between gap-3 rounded-lg bg-slate-800/50 px-3 py-2 text-xs">
                       <span className="truncate" title={rule.label}>{rule.label}</span>
-                      <input type="checkbox" checked={rule.enabled} onChange={() => toggleQualityRule(rule)} className="h-4 w-4 accent-cyan-500" />
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        disabled={savingQualityRule !== null}
+                        onChange={() => toggleQualityRule(rule)}
+                        className="h-4 w-4 accent-cyan-500 disabled:cursor-wait disabled:opacity-50"
+                      />
                     </label>
                   ))}
                 </div>
+                {qualityRuleError && (
+                  <p className="mt-2 text-xs text-rose-300">{qualityRuleError}</p>
+                )}
               </div>
             )}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">

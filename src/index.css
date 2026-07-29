@@ -141,7 +141,21 @@ html[data-theme='light'] [class~='hover:bg-slate-800/70']:hover {
 }
 
 .glow-row {
-  animation: glowPulse 1.1s ease-out 2;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 18px rgba(6, 182, 212, 0.55), inset 0 0 14px rgba(6, 182, 212, 0.12);
+  filter: drop-shadow(0 0 7px rgba(6, 182, 212, 0.42));
+  animation: glowPulse 1.1s ease-in-out infinite;
+}
+
+.glow-row > td {
+  background-color: rgba(6, 182, 212, 0.12);
+  border-top: 1px solid rgba(34, 211, 238, 0.4);
+  border-bottom: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+html[data-theme='light'] .glow-row > td {
+  background-color: rgba(6, 182, 212, 0.16);
 }
 
 .modal-backdrop {
@@ -175,9 +189,11 @@ html[data-theme='light'] [class~='hover:bg-slate-800/70']:hover {
 @keyframes glowPulse {
   0%, 100% {
     box-shadow: 0 0 14px rgba(6, 182, 212, 0.38), inset 0 0 12px rgba(6, 182, 212, 0.08);
+    filter: drop-shadow(0 0 6px rgba(6, 182, 212, 0.38));
   }
   50% {
     box-shadow: 0 0 24px rgba(6, 182, 212, 0.58), inset 0 0 18px rgba(6, 182, 212, 0.14);
+    filter: drop-shadow(0 0 11px rgba(6, 182, 212, 0.58));
   }
 }
 
@@ -186,5 +202,10 @@ html[data-theme='light'] [class~='hover:bg-slate-800/70']:hover {
   .modal-surface,
   .glow-row {
     animation: none;
+  }
+
+  .glow-row {
+    box-shadow: 0 0 18px rgba(6, 182, 212, 0.55), inset 0 0 14px rgba(6, 182, 212, 0.12);
+    filter: drop-shadow(0 0 7px rgba(6, 182, 212, 0.42));
   }
 }
