@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 
 const LoginPage = lazy(() => import('./components/LoginPage'))
@@ -30,6 +31,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AppContent />
+      <Analytics />
     </AuthProvider>
   )
 }
