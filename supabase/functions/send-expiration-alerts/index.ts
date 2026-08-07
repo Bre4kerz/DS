@@ -17,6 +17,7 @@ type LicenseItem = {
   qty: number
   serial: string
   expiration_date: string | null
+  expiration_not_required: boolean
   process: string
   cmdb_clients: { name: string } | null
 }
@@ -29,11 +30,16 @@ type QualityIssue = {
   message: string
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-cron-secret',
+}
+
 const jsonResponse = (body: unknown, status = 200) => {
   console.log('[cmdb-expiration-alerts]', JSON.stringify({ status, result: body }))
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 }
 
@@ -57,7 +63,9 @@ function validateLicense(item: LicenseItem): QualityIssue[] {
 
   if (!item.name?.trim()) add('MISSING_NAME', 'critical', 'name', 'License name is required')
   if (!item.cmdb_clients?.name) add('MISSING_CLIENT', 'critical', 'client_id', 'Client is required')
-  if (!item.expiration_date) add('MISSING_EXPIRATION_DATE', 'critical', 'expiration_date', 'Expiration date is required')
+  if (!item.expiration_date && !item.expiration_not_required) {
+    add('MISSING_EXPIRATION_DATE', 'critical', 'expiration_date', 'Expiration date is required')
+  }
   if (!item.item_type?.trim()) add('MISSING_TYPE', 'error', 'item_type', 'License type is required')
   if (!item.vendor?.trim()) add('MISSING_VENDOR', 'error', 'vendor', 'Vendor is required')
   if (!Number.isInteger(item.qty) || item.qty <= 0) add('INVALID_QUANTITY', 'error', 'qty', 'Quantity must be greater than zero')
@@ -119,22 +127,35 @@ Deno.serve(async request => {
     method: request.method,
     timestamp: new Date().toISOString(),
   })
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405)
-  const cronSecret = Deno.env.get('CRON_SECRET')
-  if (!cronSecret || request.headers.get('x-cron-secret') !== cronSecret) {
-    return jsonResponse({ error: 'Unauthorized' }, 401)
-  }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey) {
+  if (!supabaseUrl || !serviceRoleKey || !anonKey || !resendApiKey) {
     return jsonResponse({ error: 'Missing server secrets' }, 500)
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+
+  const cronSecret = Deno.env.get('CRON_SECRET')
+  const invokedByCron = Boolean(cronSecret && request.headers.get('x-cron-secret') === cronSecret)
+  if (!invokedByCron) {
+    const authorization = request.headers.get('Authorization')
+    if (!authorization?.startsWith('Bearer ')) return jsonResponse({ error: 'Unauthorized' }, 401)
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authorization } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    const { data: allowed, error: permissionError } = await userClient.rpc('cmdb_has_permission', {
+      p_permission: 'alerts.configure',
+    })
+    if (permissionError || allowed !== true) return jsonResponse({ error: 'Forbidden' }, 403)
+  }
 
   const { data: settings, error: settingsError } = await supabase
     .from('cmdb_alert_settings').select('*').eq('id', true).single<AlertSettings>()
@@ -146,7 +167,7 @@ Deno.serve(async request => {
 
   const { data, error: itemsError } = await supabase
     .from('cmdb_items')
-    .select('id,name,item_type,vendor,branch,qty,serial,expiration_date,process,cmdb_clients(name)')
+    .select('id,name,item_type,vendor,branch,qty,serial,expiration_date,expiration_not_required,process,cmdb_clients(name)')
     .eq('category', 'Licenses')
   if (itemsError) return jsonResponse({ error: itemsError.message }, 500)
   const items = (data ?? []) as unknown as LicenseItem[]
@@ -228,7 +249,9 @@ Deno.serve(async request => {
     const pending = alerts.filter(alert => !sentNotificationKeys.has(
       `${alert.id}:${alert.expiration_date}:${alert.threshold}:${recipient}`,
     ))
-    if (pending.length === 0 && detectedIssues.length === 0) continue
+    // Quality issues are included with new expiration alerts, but do not trigger
+    // a duplicate standalone email on every scheduled or manual invocation.
+    if (pending.length === 0) continue
 
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',

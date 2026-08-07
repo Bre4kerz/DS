@@ -10,7 +10,7 @@ export type ClientWithItems = CmdbClient & {
 
 const CMDB_ITEM_SELECT = `
   id, client_id, category, type, item_type, name, domain_version, role_use, vendor, branch, qty,
-  ip, serial, email, expiration_date, notes, sort_order, status, process,
+  ip, serial, email, expiration_date, expiration_not_required, notes, sort_order, status, process,
   process_updated_at, updated_by, created_at, updated_at, has_credentials
 `
 
@@ -29,6 +29,7 @@ export function useCmdbData(user: User | null) {
   const [clients, setClients] = useState<ClientWithItems[]>([])
   const [allItems, setAllItems] = useState<CmdbItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [userRole, setUserRole] = useState<CmdbRole>('viewer')
   const [permissions, setPermissions] = useState<Set<CmdbPermission>>(
     new Set(['records.view', 'history.view', 'alerts.view', 'quality.view']),
@@ -38,33 +39,41 @@ export function useCmdbData(user: User | null) {
   const [allRoles, setAllRoles] = useState<UserRole[]>([])
   const hasFetchedRef = useRef(false)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    const [{ data: clientData }, { data: itemData }] = await Promise.all([
-      supabase.from('cmdb_clients').select('*').order('name'),
-      supabase.from('cmdb_items').select(CMDB_ITEM_SELECT).order('created_at', { ascending: false }),
-    ])
+  const fetchData = useCallback(async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
+    try {
+      const [{ data: clientData }, { data: itemData }] = await Promise.all([
+        supabase.from('cmdb_clients').select('*').order('name'),
+        supabase.from('cmdb_items').select(CMDB_ITEM_SELECT).order('created_at', { ascending: false }),
+      ])
 
-    const typedItems = (itemData ?? []) as unknown as CmdbItem[]
-    const processedClients: ClientWithItems[] = (clientData ?? []).map(client => {
-      const clientItems = typedItems
-        .filter(i => i.client_id === client.id)
-        .map(i => ({ ...i, expiration_date: i.expiration_date || null }))
-      return {
-        ...client,
-        items: clientItems,
-        summary: computeClientSummary(clientItems),
-        sections: groupItemsByCategory(clientItems),
-      }
-    })
+      const typedItems = (itemData ?? []) as unknown as CmdbItem[]
+      const processedClients: ClientWithItems[] = (clientData ?? []).map(client => {
+        const clientItems = typedItems
+          .filter(i => i.client_id === client.id)
+          .map(i => ({ ...i, expiration_date: i.expiration_date || null }))
+        return {
+          ...client,
+          items: clientItems,
+          summary: computeClientSummary(clientItems),
+          sections: groupItemsByCategory(clientItems),
+        }
+      })
 
-    setClients(processedClients)
-    const normalizedItems = typedItems.map(i => ({
-      ...i,
-      expiration_date: i.expiration_date || null,
-    }))
-    setAllItems(normalizedItems)
-    setLoading(false)
+      setClients(processedClients)
+      const normalizedItems = typedItems.map(i => ({
+        ...i,
+        expiration_date: i.expiration_date || null,
+      }))
+      setAllItems(normalizedItems)
+    } finally {
+      if (showLoading) setLoading(false)
+      else setRefreshing(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -101,7 +110,7 @@ export function useCmdbData(user: User | null) {
     void loadAccess()
     const refreshAccess = () => {
       void loadAccess()
-      void fetchData()
+      void fetchData(false)
     }
     const channel = supabase.channel(`cmdb-access-${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cmdb_user_roles' }, refreshAccess)
@@ -127,22 +136,22 @@ export function useCmdbData(user: User | null) {
       updated_at: new Date().toISOString(),
     })
     if (error) console.error('Error duplicando item:', error)
-    fetchData()
+    await fetchData(false)
   }, [fetchData])
 
   const handleDelete = useCallback(async (id: string) => {
     await supabase.from('cmdb_items').delete().eq('id', id)
-    fetchData()
+    await fetchData(false)
   }, [fetchData])
 
   const handleDeleteClient = useCallback(async (clientId: string) => {
     await supabase.from('cmdb_clients').delete().eq('id', clientId)
-    fetchData()
+    await fetchData(false)
   }, [fetchData])
 
   const handleEditClient = useCallback(async (clientId: string, name: string) => {
     await supabase.from('cmdb_clients').update({ name }).eq('id', clientId)
-    fetchData()
+    await fetchData(false)
   }, [fetchData])
 
   const fetchHistory = useCallback(async (item: CmdbItem) => {
@@ -180,7 +189,7 @@ export function useCmdbData(user: User | null) {
   return {
     clients, setClients,
     allItems, setAllItems,
-    loading,
+    loading, refreshing,
     userRole,
     permissions,
     hasPermission: (permission: CmdbPermission) => permissions.has(permission),

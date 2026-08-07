@@ -6,7 +6,7 @@ import {
   Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
   AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
   Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList,
-  Moon, Sun, ArrowUpDown
+  Moon, Sun, ArrowUpDown, Send
 } from 'lucide-react'
 import {
   supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
@@ -141,15 +141,17 @@ function StatusPill({ status }: { status: string }) {
     'Expiring': 'Expiring',
     'Expired': 'Expired',
     'No date': 'No date',
+    'Not required': 'Not required',
   }
   const styles: Record<string, string> = {
     'OK': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
     'Expiring': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
     'Expired': 'bg-rose-500/15 text-rose-300 border-rose-500/30',
     'No date': 'bg-slate-700 text-slate-300 border-slate-600',
+    'Not required': 'bg-blue-500/15 text-blue-300 border-blue-500/30',
   }
   return (
-    <span className={`rounded-full border px-3 py-1 text-xs font-medium ${styles[status] || styles['No date']}`}>
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium ${styles[status] || styles['No date']}`}>
       {label[status] || status}
     </span>
   )
@@ -242,7 +244,7 @@ type QualityRule = {
   severity: 'critical' | 'error' | 'warning'
 }
 
-function CopyableIp({ value }: { value: string }) {
+function CopyableValue({ value, label = 'IP' }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false)
 
   const copyIp = async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -266,10 +268,38 @@ function CopyableIp({ value }: { value: string }) {
             ? 'bg-emerald-500/15 text-emerald-300'
             : 'text-slate-600 hover:bg-slate-700 hover:text-cyan-300'
         }`}
-        title={copied ? 'Copied' : 'Copy IP'}
-        aria-label={copied ? 'IP copied' : `Copy IP ${value}`}
+        title={copied ? 'Copied' : `Copy ${label}`}
+        aria-label={copied ? `${label} copied` : `Copy ${label} ${value}`}
       >
         {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
+      </button>
+    </div>
+  )
+}
+
+function SensitiveCopyableValue({ value, label }: { value: string; label: string }) {
+  const [revealed, setRevealed] = useState(false)
+
+  if (!value) return <span className="text-slate-600">—</span>
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {revealed ? (
+        <CopyableValue value={value} label={label} />
+      ) : (
+        <span className="font-mono text-[11px] tracking-wider text-slate-500">••••••••</span>
+      )}
+      <button
+        type="button"
+        onClick={event => {
+          event.stopPropagation()
+          setRevealed(current => !current)
+        }}
+        className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-700 hover:text-cyan-300"
+        title={revealed ? `Hide ${label}` : `Reveal ${label}`}
+        aria-label={revealed ? `Hide ${label}` : `Reveal ${label}`}
+      >
+        {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
       </button>
     </div>
   )
@@ -312,14 +342,17 @@ function SecureCredentialsPanel({ itemId }: { itemId: string }) {
   )
 }
 
-function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete = false, canViewCredentials = false, canViewHistory = false, highlightedItemId, onEdit, onDelete, onDuplicate, onHistory }: {
+function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit = false, canDelete = false, canViewCredentials = false, canViewHistory = false, highlightedItemId, onOpenChange, onAdd, onEdit, onDelete, onDuplicate, onHistory }: {
   section: SectionData
   defaultOpen?: boolean
+  canCreate?: boolean
   canEdit?: boolean
   canDelete?: boolean
   canViewCredentials?: boolean
   canViewHistory?: boolean
   highlightedItemId?: string | null
+  onOpenChange: (category: string, open: boolean) => void
+  onAdd: (category: string) => void
   onEdit: (item: CmdbItem) => void
   onDelete: (id: string) => void
   onDuplicate: (item: CmdbItem) => void
@@ -329,6 +362,7 @@ function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete 
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
+  const isLicenseSection = section.title === 'Licenses'
   const hasExpiring = section.rows.some(r => r.status === 'Expiring' || r.status === 'Expired')
   const hasCreds = canViewCredentials && section.rows.some(r => hasCredentials(r.item))
 
@@ -351,21 +385,31 @@ function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete 
     })
   }
 
+  const toggleSection = () => {
+    setOpen(current => {
+      const next = !current
+      onOpenChange(section.title, next)
+      return next
+    })
+  }
+
   useEffect(() => {
     if (highlightedItemId && section.rows.some(r => r.id === highlightedItemId)) {
       setOpen(true)
     }
   }, [highlightedItemId, section.rows])
 
+  useEffect(() => {
+    setOpen(defaultOpen)
+  }, [defaultOpen])
+
   return (
     <div className={`overflow-hidden rounded-2xl border transition-colors duration-200 ${
       hasExpiring ? 'border-amber-500/20 shadow-lg shadow-amber-500/5' : 'border-slate-800/60'
     } bg-[#0a1220]`}>
 
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-slate-800/30 transition-colors"
-      >
+      <div className="flex w-full items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-slate-800/30">
+        <button onClick={toggleSection} className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
         <div className="flex items-center gap-3.5">
           <div className={`rounded-xl p-2.5 ${
             hasExpiring ? 'bg-amber-500/10 text-amber-300' : 'bg-slate-800 text-slate-300'
@@ -380,6 +424,7 @@ function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete 
             </p>
           </div>
         </div>
+        </button>
 
         <div className="flex items-center gap-3">
           {hasExpiring && (
@@ -388,9 +433,22 @@ function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete 
               Check expirations
             </span>
           )}
-          {open ? <ChevronDown size={18} className="text-slate-500" /> : <ChevronRight size={18} className="text-slate-500" />}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => onAdd(section.title)}
+              className="flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-500/20"
+              title={`Add record to ${section.title}`}
+            >
+              <Plus size={13} />
+              <span className="hidden sm:inline">Add</span>
+            </button>
+          )}
+          <button type="button" onClick={toggleSection} className="rounded-lg p-1 hover:bg-slate-700/50" aria-label={open ? `Collapse ${section.title}` : `Expand ${section.title}`}>
+            {open ? <ChevronDown size={18} className="text-slate-500" /> : <ChevronRight size={18} className="text-slate-500" />}
+          </button>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-slate-800/60">
@@ -418,10 +476,10 @@ function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete 
                   <th className="px-5 py-2.5 text-left font-medium w-10"></th>
                   <th className="px-3 py-2.5 text-left font-medium">Type</th>
                   <th className="px-3 py-2.5 text-left font-medium">Name</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">Domain / Version</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Usage / Roles</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">IP / ID</th>
-                  <th className="px-3 py-2.5 text-left font-medium w-28">Status</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">{isLicenseSection ? 'Vendor' : 'Domain / Version'}</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">{isLicenseSection ? 'Branch' : 'Usage / Roles'}</th>
+                  <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">{isLicenseSection ? 'Serial / License' : 'IP / ID'}</th>
+                  <th className="w-32 whitespace-nowrap px-3 py-2.5 text-left font-medium">Status</th>
                   <th className="px-5 py-2.5 text-right font-medium w-32">Actions</th>
                 </tr>
               </thead>
@@ -480,28 +538,28 @@ function SectionCard({ section, defaultOpen = false, canEdit = false, canDelete 
                             {row.item.notes && (
                               <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[200px]">{row.item.notes}</p>
                             )}
-                            {(row.item.vendor || row.item.branch || row.item.category === 'Licenses') && (
+                            {isLicenseSection && (
                               <p className="text-[10px] text-cyan-500/70 mt-0.5 truncate max-w-[220px]">
-                                {[
-                                  row.item.vendor,
-                                  row.item.branch,
-                                  row.item.category === 'Licenses' ? `QTY: ${row.item.qty ?? 1}` : '',
-                                ].filter(Boolean).join(' · ')}
+                                QTY: {row.item.qty ?? 1}
                               </p>
                             )}
                           </div>
                         </td>
 
                         <td className="px-3 py-3 hidden md:table-cell">
-                          <span className="text-slate-400 text-[12px]">{row.domain || '—'}</span>
+                          <span className="text-slate-400 text-[12px]">{isLicenseSection ? row.item.vendor || '—' : row.domain || '—'}</span>
                         </td>
 
                         <td className="px-3 py-3 hidden lg:table-cell">
-                          <span className="text-slate-500 text-[11px]">{row.role || '—'}</span>
+                          <span className="text-slate-500 text-[11px]">{isLicenseSection ? row.item.branch || '—' : row.role || '—'}</span>
                         </td>
 
                         <td className="px-3 py-3 hidden sm:table-cell">
-                          <CopyableIp value={row.ip} />
+                          {isLicenseSection ? (
+                            <SensitiveCopyableValue value={row.item.serial ?? ''} label="serial or license" />
+                          ) : (
+                            <CopyableValue value={row.ip} label="IP" />
+                          )}
                         </td>
 
                         <td className="px-3 py-3">
@@ -606,6 +664,7 @@ export default function DashboardCMDB() {
     clients,
     allItems,
     loading,
+    refreshing,
     userRole,
     hasPermission,
     history,
@@ -665,6 +724,7 @@ export default function DashboardCMDB() {
     from_email: '',
   })
   const [savingAlertSettings, setSavingAlertSettings] = useState(false)
+  const [sendingAlertsNow, setSendingAlertsNow] = useState(false)
   const [alertSettingsMessage, setAlertSettingsMessage] = useState('')
   const [newRoleEmail, setNewRoleEmail] = useState('')
   const [newRoleValue, setNewRoleValue] = useState<CmdbRole>('viewer')
@@ -677,6 +737,7 @@ export default function DashboardCMDB() {
   >(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editItem, setEditItem] = useState<CmdbItem | null>(null)
+  const [newItemDefaults, setNewItemDefaults] = useState<{ clientId: string; category: string } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientName, setEditClientName] = useState('')
@@ -712,7 +773,6 @@ export default function DashboardCMDB() {
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q || q.length < 2) return []
-    const matchingClients = clients.filter(c => c.name.toLowerCase().includes(q))
     const matchingItems = allItems.filter(i =>
       i.name?.toLowerCase().includes(q) ||
       i.ip?.toLowerCase().includes(q) ||
@@ -722,23 +782,17 @@ export default function DashboardCMDB() {
       i.branch?.toLowerCase().includes(q)
     )
     const results: Array<{ item: CmdbItem; client: CmdbClient | undefined }> = []
-    // Add matching clients as client entries (use first item as anchor)
-    for (const c of matchingClients) {
-      const firstItem = allItems.find(i => i.client_id === c.id)
-      if (firstItem) {
-        results.push({ item: firstItem, client: c })
-      } else {
-        results.push({ item: { id: c.id, name: c.name + ' (client)' } as CmdbItem, client: c })
-      }
-    }
-    // Add matching items
     for (const i of matchingItems) {
-      if (!results.some(r => r.item.id === i.id)) {
-        results.push({ item: i, client: clients.find(c => c.id === i.client_id) })
-      }
+      results.push({ item: i, client: clients.find(c => c.id === i.client_id) })
     }
     return results.slice(0, 10)
   }, [search, allItems, clients])
+
+  const matchingClientResults = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return []
+    return clients.filter(client => client.name.toLowerCase().includes(q))
+  }, [search, clients])
 
   const allCategories = useMemo(() => {
     const cats = new Set(allItems.map(i => i.category).filter(Boolean))
@@ -789,31 +843,22 @@ export default function DashboardCMDB() {
     delete rest.created_at
     delete rest.updated_at
     delete rest.cmdb_clients
-    const { data, error } = await supabase.from('cmdb_items').insert({
-      ...rest,
-      name: rest.name + ' (copia)',
-      has_credentials: false,
-      updated_at: new Date().toISOString(),
-    }).select('id')
+    const { data, error } = await supabase
+      .from('cmdb_items')
+      .insert({
+        ...rest,
+        name: rest.name + ' (copia)',
+        has_credentials: false,
+        updated_at: new Date().toISOString(),
+      })
+      .select('id, client_id, category')
+      .single()
     if (error) {
       console.error('Error duplicando item:', error)
       return
     }
-    // Navigate to the same client, open section, highlight new item
-    setSelectedClientId(item.client_id)
-    if (item.category) {
-      setOpenSections(prev => new Set([...prev, item.category]))
-    }
-    fetchData()
-    if (data && data[0]) {
-      const newId = data[0].id
-      setHighlightedItemId(newId)
-      setTimeout(() => {
-        const el = document.getElementById('item-' + newId)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }, 500)
-      setTimeout(() => setHighlightedItemId(null), 4000)
-    }
+    await fetchData(false)
+    highlightSavedItem(data as { id: string; client_id: string; category: string })
   }
 
   const fetchHistory = async (item: CmdbItem) => {
@@ -1052,6 +1097,28 @@ export default function DashboardCMDB() {
     setSavingAlertSettings(false)
   }
 
+  const sendAlertsNow = async () => {
+    if (sendingAlertsNow) return
+    setSendingAlertsNow(true)
+    setAlertSettingsMessage('')
+    const { data, error } = await supabase.functions.invoke('send-expiration-alerts', {
+      body: { source: 'manual' },
+    })
+    if (error) {
+      setAlertSettingsMessage(`Could not send alerts: ${error.message}`)
+    } else {
+      const result = data as { sent?: number; failed?: number } | null
+      const sent = result?.sent ?? 0
+      const failed = result?.failed ?? 0
+      setAlertSettingsMessage(
+        sent === 0 && failed === 0
+          ? 'No new notifications to send.'
+          : `Send complete: ${sent} notification(s) sent${failed ? `, ${failed} failed` : ''}.`,
+      )
+    }
+    setSendingAlertsNow(false)
+  }
+
   const saveRole = async () => {
     if (!newRoleEmail.trim()) return
     setRoleError('')
@@ -1104,6 +1171,23 @@ export default function DashboardCMDB() {
   const currentClient = useMemo(() => {
     return clients.find(c => c.id === selectedClientId) || null
   }, [clients, selectedClientId])
+
+  const allClientSectionsOpen = Boolean(
+    currentClient?.sections.length &&
+    currentClient.sections.every(section => openSections.has(section.title)),
+  )
+
+  const toggleAllClientSections = () => {
+    if (!currentClient) return
+    setOpenSections(previous => {
+      const next = new Set(previous)
+      for (const section of currentClient.sections) {
+        if (allClientSectionsOpen) next.delete(section.title)
+        else next.add(section.title)
+      }
+      return next
+    })
+  }
 
   const filteredAuditLogs = useMemo(() => {
     const query = auditSearch.trim().toLowerCase()
@@ -1215,12 +1299,14 @@ export default function DashboardCMDB() {
   const closeItemModal = () => {
     setModalOpen(false)
     setEditItem(null)
+    setNewItemDefaults(null)
   }
 
   const handleItemSaved = async (savedItem: { id: string; client_id: string; category: string }) => {
-    await fetchData()
     setModalOpen(false)
     setEditItem(null)
+    setNewItemDefaults(null)
+    await fetchData(false)
     highlightSavedItem(savedItem)
   }
 
@@ -1250,11 +1336,11 @@ export default function DashboardCMDB() {
           <div className="flex w-full flex-wrap items-center justify-between gap-1 sm:w-auto sm:justify-end sm:gap-2">
             {user?.id && <ThemeToggle userId={user.id} />}
             <button
-              onClick={fetchData}
+              onClick={() => fetchData()}
               className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
               title="Refresh"
             >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />
             </button>
             {(hasPermission('alerts.configure') || hasPermission('roles.manage') || hasPermission('audit.view') || hasPermission('data.transfer') || hasPermission('records.create')) && (
               <>
@@ -1291,7 +1377,7 @@ export default function DashboardCMDB() {
                   <span className="hidden md:inline">Data</span>
                 </button>}
                 {hasPermission('records.create') && <button
-                  onClick={() => { setEditItem(null); setModalOpen(true) }}
+                  onClick={() => { setEditItem(null); setNewItemDefaults(null); setModalOpen(true) }}
                   className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 p-2.5 sm:px-4 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
                   title="New record"
                 >
@@ -1314,12 +1400,23 @@ export default function DashboardCMDB() {
         </div>
       </header>
 
+      {refreshing && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed left-1/2 top-24 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-cyan-400/50 bg-slate-900/95 px-4 py-2.5 text-xs font-medium text-cyan-100 shadow-xl shadow-cyan-500/20 backdrop-blur-sm"
+        >
+          <RefreshCw size={13} className="animate-spin" />
+          <span>Updating…</span>
+        </div>
+      )}
+
       <div className="mx-auto w-full min-w-0 max-w-[1800px] p-4 md:p-6">
         <div className="grid min-w-0 gap-4 lg:grid-cols-[420px_minmax(0,1fr)]">
           {/* Sidebar */}
-          <aside className="min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/50 p-4 shadow-xl h-fit">
+          <aside className="relative z-20 min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/50 p-4 shadow-xl h-fit">
             {/* Search */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3 relative">
+            <div className="relative z-50 rounded-2xl border border-slate-800 bg-slate-900 p-3">
               <div className="flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3">
                 <Search size={16} className="text-slate-400 flex-shrink-0" />
                 <input
@@ -1327,7 +1424,10 @@ export default function DashboardCMDB() {
                   onChange={e => { setSearch(e.target.value); setShowSearchDropdown(true) }}
                   onFocus={() => setShowSearchDropdown(true)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && searchResults.length > 0) {
+                    if (e.key === 'Enter' && matchingClientResults.length > 0) {
+                      setSelectedClientId(matchingClientResults[0].id)
+                      setShowSearchDropdown(false)
+                    } else if (e.key === 'Enter' && searchResults.length > 0) {
                       navigateToItem(searchResults[0].item)
                     }
                     if (e.key === 'Escape') { setSearch(''); setShowSearchDropdown(false) }
@@ -1342,8 +1442,8 @@ export default function DashboardCMDB() {
                 )}
               </div>
               {/* Search Dropdown */}
-              {showSearchDropdown && searchResults.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+              {showSearchDropdown && matchingClientResults.length === 0 && searchResults.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-[100] mt-1 max-h-[70dvh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-h-[36rem]">
                   {searchResults.map(({ item, client }) => (
                     <button
                       key={item.id}
@@ -1469,7 +1569,7 @@ export default function DashboardCMDB() {
           </aside>
 
           {/* Main content */}
-          <main className="min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
+          <main className="relative z-0 min-w-0 space-y-4 rounded-3xl border border-slate-800 bg-slate-950/40 p-4 shadow-xl md:p-5">
             {/* Expiration alerts - always visible */}
      
             {!loading && hasPermission('alerts.view') && (
@@ -1661,12 +1761,24 @@ export default function DashboardCMDB() {
 
                 {/* Client sections */}
                 <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-5">
-                  <div className="mb-6 flex items-center justify-between">
-                    <div>
+                  <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <h2 className="text-3xl font-bold">{currentClient.name}</h2>
                       <p className="mt-1 text-slate-400">Full view of client services and access</p>
                     </div>
-                    <StatusPill status={currentClient.summary.critical > 0 ? 'Expired' : currentClient.summary.expiring > 0 ? 'Expiring' : 'OK'} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      {currentClient.sections.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={toggleAllClientSections}
+                          className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:border-cyan-500/40 hover:bg-slate-700 hover:text-cyan-200"
+                        >
+                          {allClientSectionsOpen ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                          {allClientSectionsOpen ? 'Collapse all' : 'Expand all'}
+                        </button>
+                      )}
+                      <StatusPill status={currentClient.summary.critical > 0 ? 'Expired' : currentClient.summary.expiring > 0 ? 'Expiring' : 'OK'} />
+                    </div>
                   </div>
 
                   <div className="space-y-5">
@@ -1675,13 +1787,28 @@ export default function DashboardCMDB() {
                         key={selectedClientId + '-' + section.title}
                         section={section}
                         defaultOpen={openSections.has(section.title)}
+                        canCreate={hasPermission('records.create')}
                         highlightedItemId={highlightedItemId}
+                        onOpenChange={(category, sectionOpen) => {
+                          setOpenSections(previous => {
+                            const next = new Set(previous)
+                            if (sectionOpen) next.add(category)
+                            else next.delete(category)
+                            return next
+                          })
+                        }}
                         canEdit={hasPermission('records.edit')}
                         canDelete={hasPermission('records.delete')}
                         canViewCredentials={hasPermission('credentials.view')}
                         canViewHistory={hasPermission('history.view')}
+                        onAdd={category => {
+                          setEditItem(null)
+                          setNewItemDefaults({ clientId: currentClient.id, category })
+                          setModalOpen(true)
+                        }}
                         onEdit={item => {
                           setOpenSections(previous => new Set([...previous, item.category]))
+                          setNewItemDefaults(null)
                           setEditItem(item)
                           setModalOpen(true)
                         }}
@@ -1695,7 +1822,11 @@ export default function DashboardCMDB() {
                         <Server size={32} className="mx-auto mb-3 opacity-30" />
                         <p>Este cliente no tiene records</p>
                         <button
-                          onClick={() => { setEditItem(null); setModalOpen(true) }}
+                          onClick={() => {
+                            setEditItem(null)
+                            setNewItemDefaults({ clientId: currentClient.id, category: '' })
+                            setModalOpen(true)
+                          }}
                           className="mt-3 inline-flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm"
                         >
                           <Plus size={14} /> Add first record
@@ -1718,6 +1849,8 @@ export default function DashboardCMDB() {
           categories={categories}
           licenseTypes={licenseTypes}
           canEditCredentials={hasPermission('credentials.edit')}
+          defaultClientId={newItemDefaults?.clientId}
+          defaultCategory={newItemDefaults?.category}
           onClose={closeItemModal}
           onSaved={handleItemSaved}
         />
@@ -1904,7 +2037,9 @@ export default function DashboardCMDB() {
               </div>
               {alertSettingsMessage && (
                 <p className={`rounded-xl border px-3 py-2 text-xs ${
-                  alertSettingsMessage === 'Settings saved.'
+                  alertSettingsMessage === 'Settings saved.' ||
+                  alertSettingsMessage === 'No new notifications to send.' ||
+                  alertSettingsMessage.startsWith('Send complete:')
                     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                     : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
                 }`}>{alertSettingsMessage}</p>
@@ -1914,10 +2049,19 @@ export default function DashboardCMDB() {
               <button onClick={fetchNotificationHistory} className="w-full rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 sm:mr-auto sm:w-auto">
                 Delivery history
               </button>
+              <button
+                onClick={sendAlertsNow}
+                disabled={sendingAlertsNow || savingAlertSettings}
+                title="Check now using the saved settings"
+                className="flex items-center justify-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200 hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-50"
+              >
+                {sendingAlertsNow ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                {sendingAlertsNow ? 'Sending…' : 'Send now'}
+              </button>
               <button onClick={() => setAlertSettingsModal(false)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700">Close</button>
               <button
                 onClick={saveAlertSettings}
-                disabled={savingAlertSettings}
+                disabled={savingAlertSettings || sendingAlertsNow}
                 className="rounded-xl bg-cyan-600 px-4 py-2 text-sm hover:bg-cyan-500 disabled:opacity-50"
               >
                 {savingAlertSettings ? 'Saving…' : 'Save settings'}

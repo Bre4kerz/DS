@@ -32,8 +32,10 @@ type Props = {
   categories: string[]
   licenseTypes: string[]
   canEditCredentials: boolean
+  defaultClientId?: string
+  defaultCategory?: string
   onClose: () => void
-  onSaved: (savedItem: { id: string; client_id: string; category: string }) => void
+  onSaved: (savedItem: { id: string; client_id: string; category: string }) => Promise<void>
 }
 
 type FormData = {
@@ -50,6 +52,7 @@ type FormData = {
   serial: string
   email: string
   expiration_date: string
+  expiration_not_required: boolean
   notes: string
   status: string
   process: string
@@ -63,7 +66,7 @@ type FormData = {
 
 const EMPTY: FormData = {
   client_id: '', category: '', item_type: '', name: '',
-  domain_version: '', role_use: '', vendor: '', branch: '', qty: '1', ip: '', serial: '', email: '', expiration_date: '', notes: '',
+  domain_version: '', role_use: '', vendor: '', branch: '', qty: '1', ip: '', serial: '', email: '', expiration_date: '', expiration_not_required: false, notes: '',
   status: 'No date', process: '', process_updated_at: null,
   cred_user: '', cred_password: '', cred_user_alt: '', cred_password_alt: '', cred_notes: ''
 }
@@ -176,7 +179,7 @@ function CreatableCombobox({
   )
 }
 
-export default function ItemModal({ item, clients, categories, licenseTypes, canEditCredentials, onClose, onSaved }: Props) {
+export default function ItemModal({ item, clients, categories, licenseTypes, canEditCredentials, defaultClientId, defaultCategory, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const [form, setForm] = useState<FormData>(EMPTY)
   const [saving, setSaving] = useState(false)
@@ -205,8 +208,9 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
         serial: item.serial ?? '',
         email: item.email ?? '',
         expiration_date: item.expiration_date ?? '',
+        expiration_not_required: item.expiration_not_required ?? false,
         notes: item.notes ?? '',
-        status: item.status || getItemStatus(item.expiration_date),
+        status: item.expiration_not_required ? 'Not required' : item.status || getItemStatus(item.expiration_date),
         process: item.process ?? '',
         process_updated_at: item.process_updated_at ?? null,
         cred_user: '',
@@ -234,9 +238,21 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
           .finally(() => setLoadingCredentials(false))
       }
     } else {
-      setForm(EMPTY)
+      setForm({
+        ...EMPTY,
+        client_id: defaultClientId ?? '',
+        category: defaultCategory ?? '',
+      })
     }
-  }, [item, canEditCredentials])
+  }, [item, canEditCredentials, defaultClientId, defaultCategory])
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose, saving])
 
   const set = (k: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => {
@@ -249,6 +265,15 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
       }
       return updated
     })
+
+  const setExpirationNotRequired = (checked: boolean) => {
+    setForm(current => ({
+      ...current,
+      expiration_not_required: checked,
+      expiration_date: checked ? '' : current.expiration_date,
+      status: checked ? 'Not required' : getItemStatus(current.expiration_date || null),
+    }))
+  }
 
   const handleAddClient = async () => {
     if (!newClient.trim()) return
@@ -290,7 +315,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
     if (item) {
       // Build diff for history
       const changes: Record<string, { from: unknown; to: unknown }> = {}
-      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','vendor','branch','qty','ip','serial','expiration_date','status','process','notes']
+      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','vendor','branch','qty','ip','serial','expiration_date','expiration_not_required','status','process','notes']
       trackFields.forEach(field => {
         const oldVal = item[field] ?? ''
         const newVal = payload[field] ?? ''
@@ -314,7 +339,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
           changes,
         })
       }
-      onSaved({ id: item.id, client_id: form.client_id, category: form.category })
+      await onSaved({ id: item.id, client_id: form.client_id, category: form.category })
     } else {
       const { data: newItem, error: itemError } = await supabase
         .from('cmdb_items')
@@ -329,7 +354,7 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
         password_alt: cred_password_alt,
         notes: cred_notes,
       })
-      onSaved({ id: newItem.id, client_id: form.client_id, category: form.category })
+      await onSaved({ id: newItem.id, client_id: form.client_id, category: form.category })
     }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not save the record')
@@ -354,10 +379,11 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
 
 
   return (
-    <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
       <div
         className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col"
-        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
       >
         <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
           <h3 className="font-semibold text-lg">{item ? 'Edit record' : 'New record'}</h3>
@@ -455,8 +481,20 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
             {!isLicense && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Contact email" value={form.email} onChange={set('email')} placeholder="admin@empresa.com" type="email" />
-                <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
+                <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" disabled={form.expiration_not_required} />
               </div>
+            )}
+
+            {!isLicense && (
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-3 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={form.expiration_not_required}
+                  onChange={event => setExpirationNotRequired(event.target.checked)}
+                  className="h-4 w-4 accent-cyan-500"
+                />
+                No expiration date required
+              </label>
             )}
 
             {!isLicense && (
@@ -464,8 +502,9 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 uppercase tracking-wide">Status</label>
-                    <select value={form.status} onChange={set('status')} className={SELECT_CLASS} style={SELECT_STYLE}>
+                    <select value={form.status} onChange={set('status')} disabled={form.expiration_not_required} className={`${SELECT_CLASS} disabled:cursor-not-allowed disabled:opacity-40`} style={SELECT_STYLE}>
                       <option value="">Select...</option>
+                      <option value="Not required">Not required</option>
                       <option value="OK">OK</option>
                       <option value="Expiring">Expiring</option>
                       <option value="Expired">Expired</option>
@@ -525,14 +564,25 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <Field label="Serial / License" value={form.serial} onChange={set('serial')} placeholder="XXXX-XXXX-XXXX" mono />
                       <Field label="QTY" value={form.qty} onChange={set('qty')} placeholder="1" type="number" />
-                      <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" />
+                      <Field label="Expiration date" value={form.expiration_date} onChange={set('expiration_date')} type="date" disabled={form.expiration_not_required} />
                     </div>
+
+                    <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={form.expiration_not_required}
+                        onChange={event => setExpirationNotRequired(event.target.checked)}
+                        className="h-4 w-4 accent-cyan-500"
+                      />
+                      No expiration date required
+                    </label>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <label className="text-xs text-slate-400 uppercase tracking-wide">Status</label>
-                        <select value={form.status} onChange={set('status')} className={SELECT_CLASS} style={SELECT_STYLE}>
+                        <select value={form.status} onChange={set('status')} disabled={form.expiration_not_required} className={`${SELECT_CLASS} disabled:cursor-not-allowed disabled:opacity-40`} style={SELECT_STYLE}>
                           <option value="">Select...</option>
+                          <option value="Not required">Not required</option>
                           <option value="OK">OK</option>
                           <option value="Expiring">Expiring</option>
                           <option value="Expired">Expired</option>
@@ -644,11 +694,11 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
 }
 
 function Field({
-  label, value, onChange, placeholder, type = 'text', mono
+  label, value, onChange, placeholder, type = 'text', mono, disabled = false
 }: {
   label: string; value: string
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  placeholder?: string; type?: string; mono?: boolean
+  placeholder?: string; type?: string; mono?: boolean; disabled?: boolean
 }) {
   return (
     <div className="space-y-1.5">
@@ -658,7 +708,8 @@ function Field({
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className={`w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors ${mono ? 'font-mono' : ''}`}
+        disabled={disabled}
+        className={`w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mono ? 'font-mono' : ''}`}
       />
     </div>
   )

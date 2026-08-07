@@ -38,6 +38,7 @@ export type CmdbItem = {
   serial: string
   email: string
   expiration_date: string | null
+  expiration_not_required: boolean
   notes: string
   sort_order: number
   has_credentials: boolean
@@ -65,7 +66,7 @@ export type UserRole = {
   created_at: string
 }
 
-export type ItemStatus = 'OK' | 'Expiring' | 'Expired' | 'No date'
+export type ItemStatus = 'OK' | 'Expiring' | 'Expired' | 'No date' | 'Not required'
 
 function getCalendarDayDifference(expirationDate: string): number {
   const [year, month, day] = expirationDate.split('-').map(Number)
@@ -76,7 +77,8 @@ function getCalendarDayDifference(expirationDate: string): number {
   return Math.round((expirationDay - today) / (1000 * 60 * 60 * 24))
 }
 
-export function getItemStatus(expiration_date: string | null): ItemStatus {
+export function getItemStatus(expiration_date: string | null, expirationNotRequired = false): ItemStatus {
+  if (expirationNotRequired) return 'Not required'
   if (!expiration_date) return 'No date'
   const diffDays = getCalendarDayDifference(expiration_date)
   if (Number.isNaN(diffDays)) return 'No date'
@@ -177,7 +179,7 @@ export function groupItemsByCategory(items: CmdbItem[]): SectionData[] {
       domain: item.domain_version,
       role: item.role_use,
       ip: item.ip,
-      status: getItemStatus(item.expiration_date),
+      status: getItemStatus(item.expiration_date, item.expiration_not_required),
       item,
     })
     grouped.set(item.category, rows)
