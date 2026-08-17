@@ -277,11 +277,14 @@ function CredentialField({ label, value }: { label: string; value: string }) {
             onClick={copyValue}
             disabled={!value}
             className={`rounded-lg p-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-              copied ? 'bg-emerald-600/30 text-emerald-300' : 'bg-slate-800 hover:bg-slate-700'
+              copied
+                ? 'scale-110 bg-emerald-500/15 text-emerald-300'
+                : 'bg-slate-800 hover:bg-slate-700'
             }`}
             title={copied ? 'Copied' : 'Copy'}
+            aria-label={copied ? `${label} copied` : `Copy ${label}`}
           >
-            <Copy size={14} />
+            {copied ? <CheckCircle size={14} /> : <Copy size={14} />}
           </button>
         </div>
       </div>
