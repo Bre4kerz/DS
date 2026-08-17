@@ -132,6 +132,12 @@ export type Credentials = {
   notes: string
 }
 
+export type CredentialBulkField =
+  | 'username'
+  | 'password'
+  | 'alternative_username'
+  | 'alternative_password'
+
 export function hasCredentials(item: CmdbItem): boolean {
   return item.has_credentials === true
 }
@@ -166,6 +172,33 @@ export async function saveCredentials(itemId: string, credentials: Credentials):
     p_notes: credentials.notes,
   })
   if (error) throw error
+}
+
+export async function bulkReplaceCredentials({
+  clientId,
+  category,
+  field,
+  oldValue,
+  newValue,
+  preview,
+}: {
+  clientId: string
+  category: string
+  field: CredentialBulkField
+  oldValue: string
+  newValue: string
+  preview: boolean
+}): Promise<number> {
+  const { data, error } = await supabase.rpc('bulk_replace_cmdb_credentials_authorized', {
+    p_client_id: clientId,
+    p_category: category,
+    p_field: field,
+    p_old_value: oldValue,
+    p_new_value: newValue,
+    p_preview: preview,
+  })
+  if (error) throw error
+  return typeof data === 'number' ? data : Number(data ?? 0)
 }
 
 export function groupItemsByCategory(items: CmdbItem[]): SectionData[] {

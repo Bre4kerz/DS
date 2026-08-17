@@ -86,7 +86,7 @@ No ejecutes dos veces una migración que ya haya sido aplicada.
 Para una instalación existente, la migración más reciente es:
 
 ```text
-20260817_optimize_permission_loading.sql
+20260818_bulk_replace_credentials.sql
 ```
 
 La migración de acceso granular asigna inicialmente `superuser` a

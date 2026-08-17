@@ -26,6 +26,13 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE proname = 'bulk_replace_cmdb_credentials_authorized'
+  ) THEN
+    RAISE EXCEPTION 'bulk credential replacement function is missing';
+  END IF;
+
+  IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
     WHERE tgname = 'preserve_last_cmdb_admin'
       AND NOT tgisinternal
