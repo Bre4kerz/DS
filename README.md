@@ -86,12 +86,12 @@ No ejecutes dos veces una migración que ya haya sido aplicada.
 Para una instalación existente, la migración más reciente es:
 
 ```text
-20260804_add_quality_rules_and_data_transfer.sql
+20260817_optimize_permission_loading.sql
 ```
 
-Esta migración asigna inicialmente `superuser` a
-`bhernandez@josys.com.mx`. Después de aplicarla, despliega el frontend y vuelve
-a iniciar sesión para cargar los permisos.
+La migración de acceso granular asigna inicialmente `superuser` a
+`bhernandez@josys.com.mx`. Después de aplicar las migraciones pendientes,
+despliega el frontend y vuelve a iniciar sesión para cargar los permisos.
 
 ## Acceso y permisos
 

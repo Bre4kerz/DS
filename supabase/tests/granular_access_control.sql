@@ -19,6 +19,13 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE proname = 'cmdb_get_my_access'
+  ) THEN
+    RAISE EXCEPTION 'cmdb_get_my_access function is missing';
+  END IF;
+
+  IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
     WHERE tgname = 'preserve_last_cmdb_admin'
       AND NOT tgisinternal

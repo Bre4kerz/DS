@@ -25,6 +25,17 @@ export const CMDB_PERMISSION_KEYS = [
 export type CmdbPermission = typeof CMDB_PERMISSION_KEYS[number]
 type CmdbRole = 'superuser' | 'admin' | 'viewer'
 
+type CmdbAccessPayload = {
+  role?: unknown
+  permissions?: unknown
+}
+
+const isCmdbRole = (value: unknown): value is CmdbRole =>
+  value === 'superuser' || value === 'admin' || value === 'viewer'
+
+const isCmdbPermission = (value: unknown): value is CmdbPermission =>
+  typeof value === 'string' && CMDB_PERMISSION_KEYS.includes(value as CmdbPermission)
+
 export function useCmdbData(user: User | null) {
   const [clients, setClients] = useState<ClientWithItems[]>([])
   const [allItems, setAllItems] = useState<CmdbItem[]>([])
@@ -38,6 +49,7 @@ export function useCmdbData(user: User | null) {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [allRoles, setAllRoles] = useState<UserRole[]>([])
   const hasFetchedRef = useRef(false)
+  const accessRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchData = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -84,7 +96,7 @@ export function useCmdbData(user: User | null) {
 
   useEffect(() => {
     if (!user?.email) return
-    const loadAccess = async () => {
+    const loadLegacyAccess = async () => {
       const { data } = await supabase.from('cmdb_user_roles')
         .select('*').eq('user_email', user.email!).maybeSingle()
       const role = data?.role as CmdbRole | undefined
@@ -107,10 +119,37 @@ export function useCmdbData(user: User | null) {
       setPermissions(new Set(rpcAvailable ? resolved : defaults))
     }
 
+    const loadAccess = async () => {
+      const { data, error } = await supabase.rpc('cmdb_get_my_access')
+      if (error?.code === 'PGRST202') {
+        await loadLegacyAccess()
+        return
+      }
+      if (error) {
+        console.error('Error loading CMDB access:', error)
+        return
+      }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        console.error('Invalid CMDB access response')
+        return
+      }
+
+      const access = data as CmdbAccessPayload
+      setUserRole(isCmdbRole(access.role) ? access.role : 'viewer')
+      setPermissions(new Set(
+        Array.isArray(access.permissions)
+          ? access.permissions.filter(isCmdbPermission)
+          : [],
+      ))
+    }
+
     void loadAccess()
     const refreshAccess = () => {
-      void loadAccess()
-      void fetchData(false)
+      if (accessRefreshTimerRef.current) clearTimeout(accessRefreshTimerRef.current)
+      accessRefreshTimerRef.current = setTimeout(() => {
+        accessRefreshTimerRef.current = null
+        void Promise.all([loadAccess(), fetchData(false)])
+      }, 250)
     }
     const channel = supabase.channel(`cmdb-access-${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cmdb_user_roles' }, refreshAccess)
@@ -119,6 +158,10 @@ export function useCmdbData(user: User | null) {
       .subscribe()
 
     return () => {
+      if (accessRefreshTimerRef.current) {
+        clearTimeout(accessRefreshTimerRef.current)
+        accessRefreshTimerRef.current = null
+      }
       void supabase.removeChannel(channel)
     }
   }, [user?.email, user?.id, fetchData])
