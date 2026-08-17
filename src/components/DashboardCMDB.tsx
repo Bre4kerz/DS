@@ -32,6 +32,81 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'Backup': <HardDrive size={18} />,
 }
 
+type CategoryStyle = {
+  border: string
+  icon: string
+  rgb: string
+}
+
+const DEFAULT_CATEGORY_STYLE: CategoryStyle = {
+  border: 'border-slate-700/60',
+  icon: 'bg-slate-800 text-slate-300',
+  rgb: '100 116 139',
+}
+
+const CATEGORY_STYLES: Record<string, CategoryStyle> = {
+  'Servers': {
+    border: 'border-cyan-500/30',
+    icon: 'bg-cyan-500/10 text-cyan-300',
+    rgb: '6 182 212',
+  },
+  'NAS/Storage': {
+    border: 'border-amber-500/30',
+    icon: 'bg-amber-500/10 text-amber-300',
+    rgb: '245 158 11',
+  },
+  'Remote Access': {
+    border: 'border-violet-500/30',
+    icon: 'bg-violet-500/10 text-violet-300',
+    rgb: '139 92 246',
+  },
+  'OA Devices': {
+    border: 'border-sky-500/30',
+    icon: 'bg-sky-500/10 text-sky-300',
+    rgb: '14 165 233',
+  },
+  'Managed services': {
+    border: 'border-emerald-500/30',
+    icon: 'bg-emerald-500/10 text-emerald-300',
+    rgb: '16 185 129',
+  },
+  'Licenses': {
+    border: 'border-rose-500/30',
+    icon: 'bg-rose-500/10 text-rose-300',
+    rgb: '244 63 94',
+  },
+  'Services': {
+    border: 'border-blue-500/30',
+    icon: 'bg-blue-500/10 text-blue-300',
+    rgb: '59 130 246',
+  },
+  'VPN': {
+    border: 'border-indigo-500/30',
+    icon: 'bg-indigo-500/10 text-indigo-300',
+    rgb: '99 102 241',
+  },
+  'Firewall': {
+    border: 'border-orange-500/30',
+    icon: 'bg-orange-500/10 text-orange-300',
+    rgb: '249 115 22',
+  },
+  'Antivirus': {
+    border: 'border-red-500/30',
+    icon: 'bg-red-500/10 text-red-300',
+    rgb: '239 68 68',
+  },
+  'Backup': {
+    border: 'border-teal-500/30',
+    icon: 'bg-teal-500/10 text-teal-300',
+    rgb: '20 184 166',
+  },
+  'Red': {
+    border: 'border-lime-500/30',
+    icon: 'bg-lime-500/10 text-lime-300',
+    rgb: '132 204 22',
+  },
+}
+
 type ClientWithItems = CmdbClient & {
   items: CmdbItem[]
   summary: ClientSummary
@@ -362,6 +437,7 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
+  const categoryStyle = CATEGORY_STYLES[section.title] || DEFAULT_CATEGORY_STYLE
   const isLicenseSection = section.title === 'Licenses'
   const hasExpiring = section.rows.some(r => r.status === 'Expiring' || r.status === 'Expired')
   const hasCreds = canViewCredentials && section.rows.some(r => hasCredentials(r.item))
@@ -404,16 +480,18 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
   }, [defaultOpen])
 
   return (
-    <div className={`overflow-hidden rounded-2xl border transition-colors duration-200 ${
-      hasExpiring ? 'border-amber-500/20 shadow-lg shadow-amber-500/5' : 'border-slate-800/60'
-    } bg-[#0a1220]`}>
+    <div
+      className={`category-card overflow-hidden rounded-2xl border ${categoryStyle.border} ${
+      hasExpiring ? 'shadow-lg shadow-amber-500/5' : ''
+      } bg-[#0a1220]`}
+      data-open={open}
+      style={{ '--category-rgb': categoryStyle.rgb } as React.CSSProperties}
+    >
 
-      <div className="flex w-full items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-slate-800/30">
+      <div className="category-card-header flex w-full items-center justify-between gap-3 px-5 py-4">
         <button onClick={toggleSection} className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
         <div className="flex items-center gap-3.5">
-          <div className={`rounded-xl p-2.5 ${
-            hasExpiring ? 'bg-amber-500/10 text-amber-300' : 'bg-slate-800 text-slate-300'
-          }`}>
+          <div className={`category-icon rounded-xl p-2.5 ${categoryStyle.icon}`}>
             {icon}
           </div>
           <div className="text-left">

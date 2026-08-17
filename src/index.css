@@ -29,6 +29,32 @@ body {
   overflow-x: clip;
 }
 
+.category-card {
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+.category-card-header,
+.category-icon {
+  transition: background-color 200ms ease, box-shadow 200ms ease;
+}
+
+.category-card:hover,
+.category-card[data-open='true'] {
+  border-color: rgb(var(--category-rgb) / 0.65);
+  box-shadow: 0 0 24px rgb(var(--category-rgb) / 0.16), inset 0 0 18px rgb(var(--category-rgb) / 0.035);
+}
+
+.category-card:hover .category-card-header,
+.category-card[data-open='true'] .category-card-header {
+  background-color: rgb(var(--category-rgb) / 0.045);
+}
+
+.category-card:hover .category-icon,
+.category-card[data-open='true'] .category-icon {
+  background-color: rgb(var(--category-rgb) / 0.18);
+  box-shadow: 0 0 16px rgb(var(--category-rgb) / 0.2);
+}
+
 html[data-theme='light'] [class~="bg-[#050d18]"] {
   background-color: #f1f5f9 !important;
 }
