@@ -45,6 +45,7 @@ export type CmdbItem = {
   status: string
   process: string
   process_updated_at: string | null
+  process_stale_days: number
   updated_by: string
   created_at: string
   updated_at: string

@@ -11,7 +11,7 @@ export type ClientWithItems = CmdbClient & {
 const CMDB_ITEM_SELECT = `
   id, client_id, category, type, item_type, name, domain_version, role_use, vendor, branch, qty,
   ip, serial, email, expiration_date, expiration_not_required, notes, sort_order, status, process,
-  process_updated_at, updated_by, created_at, updated_at, has_credentials
+  process_updated_at, process_stale_days, updated_by, created_at, updated_at, has_credentials
 `
 
 export const CMDB_PERMISSION_KEYS = [
@@ -176,6 +176,7 @@ export function useCmdbData(user: User | null) {
       ...rest,
       name: rest.name + ' (copia)',
       has_credentials: false,
+      process_updated_at: rest.process ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     })
     if (error) console.error('Error duplicando item:', error)

@@ -12,11 +12,12 @@ export type CmdbImportRow = {
   expiration_date: string
   notes: string
   process: string
+  process_stale_days: string
 }
 
 export const CMDB_CSV_COLUMNS: Array<keyof CmdbImportRow> = [
   'client', 'category', 'item_type', 'name', 'vendor', 'branch', 'qty',
-  'ip', 'serial', 'email', 'expiration_date', 'notes', 'process',
+  'ip', 'serial', 'email', 'expiration_date', 'notes', 'process', 'process_stale_days',
 ]
 
 export const escapeCsv = (value: unknown) => {

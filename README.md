@@ -86,7 +86,7 @@ No ejecutes dos veces una migración que ya haya sido aplicada.
 Para una instalación existente, la migración más reciente es:
 
 ```text
-20260818_bulk_replace_credentials.sql
+20260820_add_renewal_email_workflow.sql
 ```
 
 La migración de acceso granular asigna inicialmente `superuser` a

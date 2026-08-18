@@ -122,7 +122,8 @@ Como administrador, abre **Email alerts** y configura:
 
 - activación;
 - remitente;
-- destinatarios;
+- destinatarios del resumen y de procesos estancados;
+- destinatarios de escalación (opcional; si se omiten se usan los destinatarios normales);
 - umbrales en días.
 
 Ejemplo de umbrales:
@@ -131,8 +132,15 @@ Ejemplo de umbrales:
 90, 60, 30, 15, 7, 1, 0
 ```
 
-La función evita enviar nuevamente la misma combinación de ítem, fecha de
-expiración, umbral y destinatario.
+La ejecución diaria realiza tres acciones:
+
+- envía un resumen diario de las renovaciones dentro de la ventana configurada;
+- avisa una sola vez cuando un proceso lleva los días configurados sin seguimiento;
+- escala una sola vez cuando quedan 7 días o menos y vuelve a escalar si la licencia vence.
+
+**Mark follow-up now** reinicia el contador del proceso. Si vuelve a estancarse,
+se genera un nuevo evento de aviso. La deduplicación se guarda en
+`cmdb_renewal_notifications`; los envíos fallidos pueden reintentarse.
 
 **Delivery history** muestra hasta 500 entregas recientes. **Queue for resend**
 elimina la marca de deduplicación; la alerta se enviará nuevamente en la
@@ -176,9 +184,10 @@ Configura una solicitud diaria:
 - Header `Content-Type`: `application/json`
 - Header `x-cron-secret`: el valor de `CRON_SECRET`
 - Body: `{}`
-- Cron: `0 14 * * *`
+- Cron: `0 14 * * *` (8:00 a. m. en `America/Mexico_City`)
 
-La expresión está en UTC. Ajusta la hora si cambia el horario operativo deseado.
+La expresión está en UTC. El cálculo de fechas y la llave del resumen diario
+utilizan el campo `timezone` de `cmdb_alert_settings`.
 
 ### Prueba manual
 
@@ -205,14 +214,24 @@ Respuesta típica:
 ```json
 {
   "licenses": 216,
+  "summary_items": 24,
+  "stalled_processes": 3,
+  "critical_items": 2,
   "issues": 913,
-  "sent": 0,
-  "failed": 0
+  "sent": 6,
+  "failed": 0,
+  "sent_by_type": {
+    "daily_summary": 2,
+    "stalled_process": 2,
+    "critical_7_days": 2,
+    "expired": 0
+  }
 }
 ```
 
-`sent` cuenta alertas de vencimiento nuevas, no la cantidad física de correos.
-Un valor `0` puede significar que las alertas ya estaban deduplicadas.
+`sent` cuenta correos físicos enviados. `sent_by_type` los separa entre resumen,
+proceso estancado, ventana crítica y licencia vencida. Un valor `0` puede
+significar que los eventos ya estaban deduplicados.
 
 ### Problemas de calidad detectados
 

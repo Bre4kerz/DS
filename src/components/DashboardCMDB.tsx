@@ -321,9 +321,10 @@ type AuditLog = {
 
 type ExpirationNotification = {
   id: number
-  item_id: string
-  expiration_date: string
-  threshold_days: number
+  source: 'expiration' | 'renewal'
+  item_id: string | null
+  notification_type: string
+  detail: string
   recipient: string
   status: 'sent' | 'failed'
   error: string | null
@@ -778,6 +779,7 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
                   <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">{isLicenseSection ? 'Branch' : 'Usage / Roles'}</th>
                   <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">{isLicenseSection ? 'Serial / License' : 'IP / ID'}</th>
                   <th className="w-32 whitespace-nowrap px-3 py-2.5 text-left font-medium">Status</th>
+                  {isLicenseSection && <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Process</th>}
                   <th className="px-5 py-2.5 text-right font-medium w-32">Actions</th>
                 </tr>
               </thead>
@@ -786,6 +788,7 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
                   const isExpanded = expandedRows.has(row.id)
                   const creds = canViewCredentials && hasCredentials(row.item)
                   const isHighlighted = highlightedItemId === row.id
+                  const processTracking = isLicenseSection ? getProcessTracking(row.item) : null
 
                   return (
                     <Fragment key={row.id}>
@@ -837,9 +840,21 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
                               <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[200px]">{row.item.notes}</p>
                             )}
                             {isLicenseSection && (
-                              <p className="text-[10px] text-cyan-500/70 mt-0.5 truncate max-w-[220px]">
-                                QTY: {row.item.qty ?? 1}
-                              </p>
+                              <>
+                                <p className="text-[10px] text-cyan-500/70 mt-0.5 truncate max-w-[220px]">
+                                  QTY: {row.item.qty ?? 1}
+                                </p>
+                                {row.item.process && (
+                                  <p className={`mt-1 max-w-[240px] truncate text-[10px] lg:hidden ${
+                                    processTracking?.stalled ? 'text-orange-300' : 'text-violet-300'
+                                  }`}>
+                                    {row.item.process}
+                                    {processTracking?.ageDays !== null && processTracking?.ageDays !== undefined
+                                      ? ` · ${processTracking.ageDays}d`
+                                      : ''}
+                                  </p>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
@@ -863,6 +878,29 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
                         <td className="px-3 py-3">
                           <StatusPill status={row.status} />
                         </td>
+
+                        {isLicenseSection && (
+                          <td className="hidden max-w-[220px] px-3 py-3 lg:table-cell">
+                            {row.item.process ? (
+                              <div title={row.item.process}>
+                                <p className="truncate text-[11px] font-medium text-violet-300">{row.item.process}</p>
+                                <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] ${
+                                  processTracking?.stalled
+                                    ? 'border-orange-500/30 bg-orange-500/10 text-orange-300'
+                                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
+                                }`}>
+                                  {processTracking?.ageDays === null
+                                    ? 'Tracking not started'
+                                    : processTracking?.stalled
+                                      ? `Stalled · ${processTracking?.ageDays}d`
+                                      : `${processTracking?.ageDays ?? 0}d in stage · limit ${processTracking?.limitDays ?? 5}d`}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                        )}
 
                         <td className="px-5 py-3">
                           <div
@@ -911,7 +949,7 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
 
                       {isExpanded && creds && (
                         <tr>
-                          <td colSpan={8} className="px-0 py-0">
+                          <td colSpan={isLicenseSection ? 9 : 8} className="px-0 py-0">
                             <div className="bg-slate-950/40 border-t border-slate-800/30 px-5 py-4">
                               <div className="flex items-center gap-2 mb-3">
                                 <Lock size={13} className="text-yellow-400/80" />
@@ -941,15 +979,20 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
   )
 }
 
-function isProcessStale(item: CmdbItem, staleDays = 5): boolean {
+function getProcessTracking(item: CmdbItem): { ageDays: number | null; limitDays: number; stalled: boolean } | null {
+  if (!item.process?.trim()) return null
+  const limitDays = Math.min(365, Math.max(1, item.process_stale_days ?? 5))
+  if (!item.process_updated_at) return { ageDays: null, limitDays, stalled: false }
+  const updated = new Date(item.process_updated_at)
+  if (Number.isNaN(updated.getTime())) return { ageDays: null, limitDays, stalled: false }
+  const ageDays = Math.max(0, Math.floor((Date.now() - updated.getTime()) / (1000 * 60 * 60 * 24)))
+  return { ageDays, limitDays, stalled: ageDays >= limitDays }
+}
+
+function isProcessStale(item: CmdbItem): boolean {
   const status = getItemStatus(item.expiration_date)
   if (status === 'OK' || status === 'No date') return false
-  if (!item.process || item.process === '') return false
-  if (!item.process_updated_at) return false
-  const updated = new Date(item.process_updated_at)
-  const now = new Date()
-  const diff = Math.floor((now.getTime() - updated.getTime()) / (1000 * 60 * 60 * 24))
-  return diff >= staleDays
+  return getProcessTracking(item)?.stalled === true
 }
 
 export default function DashboardCMDB() {
@@ -1024,6 +1067,7 @@ export default function DashboardCMDB() {
     enabled: false,
     thresholds: '90, 60, 30, 15, 7, 1, 0',
     recipients: '',
+    escalation_recipients: '',
     from_email: '',
   })
   const [savingAlertSettings, setSavingAlertSettings] = useState(false)
@@ -1152,6 +1196,7 @@ export default function DashboardCMDB() {
         ...rest,
         name: rest.name + ' (copia)',
         has_credentials: false,
+        process_updated_at: rest.process ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
       })
       .select('id, client_id, category')
@@ -1338,21 +1383,52 @@ export default function DashboardCMDB() {
   const fetchNotificationHistory = async () => {
     setNotificationHistoryModal(true)
     setLoadingNotifications(true)
-    const { data } = await supabase.from('cmdb_expiration_notifications')
-      .select('*').order('sent_at', { ascending: false }).limit(500)
-    setNotifications((data ?? []) as ExpirationNotification[])
+    const [{ data: expirationData }, { data: renewalData }] = await Promise.all([
+      supabase.from('cmdb_expiration_notifications').select('*').order('sent_at', { ascending: false }).limit(500),
+      supabase.from('cmdb_renewal_notifications').select('*').order('sent_at', { ascending: false }).limit(500),
+    ])
+    const expirationNotifications = (expirationData ?? []).map(notification => ({
+      id: notification.id,
+      source: 'expiration' as const,
+      item_id: notification.item_id,
+      notification_type: 'expiration_threshold',
+      detail: `Expiration ${notification.expiration_date} · threshold ${notification.threshold_days}d`,
+      recipient: notification.recipient,
+      status: notification.status,
+      error: notification.error,
+      sent_at: notification.sent_at,
+    }))
+    const renewalNotifications = (renewalData ?? []).map(notification => ({
+      id: notification.id,
+      source: 'renewal' as const,
+      item_id: notification.item_id,
+      notification_type: notification.notification_type,
+      detail: notification.notification_type.replaceAll('_', ' '),
+      recipient: notification.recipient,
+      status: notification.status,
+      error: notification.error,
+      sent_at: notification.sent_at,
+    }))
+    setNotifications([...expirationNotifications, ...renewalNotifications]
+      .sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
+      .slice(0, 500) as ExpirationNotification[])
     setLoadingNotifications(false)
   }
 
-  const queueNotificationRetry = async (notificationId: number) => {
-    const { error } = await supabase.rpc('queue_cmdb_notification_retry', {
-      p_notification_id: notificationId,
+  const queueNotificationRetry = async (notification: ExpirationNotification) => {
+    const functionName = notification.source === 'renewal'
+      ? 'queue_cmdb_renewal_notification_retry'
+      : 'queue_cmdb_notification_retry'
+    const { error } = await supabase.rpc(functionName, {
+      p_notification_id: notification.id,
     })
     if (error) {
       console.error('Could not queue notification retry:', error)
       return
     }
-    setNotifications(current => current.filter(notification => notification.id !== notificationId))
+    setNotifications(current => current.filter(candidate =>
+      candidate.id !== notification.id || candidate.source !== notification.source,
+    ))
   }
 
   const openAlertSettings = async () => {
@@ -1365,6 +1441,7 @@ export default function DashboardCMDB() {
         enabled: data.enabled,
         thresholds: (data.thresholds ?? []).join(', '),
         recipients: (data.recipients ?? []).join('\n'),
+        escalation_recipients: (data.escalation_recipients ?? []).join('\n'),
         from_email: data.from_email ?? '',
       })
     }
@@ -1377,6 +1454,9 @@ export default function DashboardCMDB() {
     )].sort((a, b) => b - a)
     const recipients = [...new Set(
       alertSettings.recipients.split(/[\n,;]/).map(value => value.trim().toLowerCase()).filter(Boolean)
+    )]
+    const escalationRecipients = [...new Set(
+      alertSettings.escalation_recipients.split(/[\n,;]/).map(value => value.trim().toLowerCase()).filter(Boolean)
     )]
     if (thresholds.length === 0) {
       setAlertSettingsMessage('Add at least one valid threshold.')
@@ -1392,6 +1472,7 @@ export default function DashboardCMDB() {
       enabled: alertSettings.enabled,
       thresholds,
       recipients,
+      escalation_recipients: escalationRecipients,
       from_email: alertSettings.from_email.trim(),
       updated_at: new Date().toISOString(),
       updated_by: user?.id ?? null,
@@ -1958,6 +2039,7 @@ export default function DashboardCMDB() {
             const days = getDaysUntilExpiration(item.expiration_date)
             const client = clients.find(c => c.id === item.client_id)
             const isStale = isProcessStale(item)
+            const processTracking = getProcessTracking(item)
 
             return (
               <div
@@ -1984,7 +2066,9 @@ export default function DashboardCMDB() {
                     {isStale && (
                       <>
                         <span className="text-slate-700 text-xs">·</span>
-                        <span className="text-xs text-orange-400/80">No follow-up +5d</span>
+                        <span className="text-xs text-orange-400/80">
+                          Stalled {processTracking?.ageDays ?? 0}d · limit {processTracking?.limitDays ?? 5}d
+                        </span>
                       </>
                     )}
                   </div>
@@ -2346,6 +2430,17 @@ export default function DashboardCMDB() {
                 <p className="text-[11px] text-slate-500">One address per line, or separate with commas.</p>
               </div>
               <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 uppercase tracking-wide">Escalation recipients</label>
+                <textarea
+                  value={alertSettings.escalation_recipients}
+                  onChange={event => setAlertSettings(current => ({ ...current, escalation_recipients: event.target.value }))}
+                  rows={3}
+                  placeholder={'renewals-manager@example.com'}
+                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-500"
+                />
+                <p className="text-[11px] text-slate-500">Receives the 7-day and expired alerts. If empty, regular recipients are used.</p>
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-xs text-slate-400 uppercase tracking-wide">Thresholds (days)</label>
                 <input
                   value={alertSettings.thresholds}
@@ -2395,7 +2490,7 @@ export default function DashboardCMDB() {
           <div className="modal-surface flex max-h-[86dvh] w-full max-w-4xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-800 p-5">
               <div>
-                <h3 className="font-semibold">Expiration delivery history</h3>
+                <h3 className="font-semibold">Email delivery history</h3>
                 <p className="text-xs text-slate-500">{notifications.length} recent delivery record(s)</p>
               </div>
               <button onClick={() => setNotificationHistoryModal(false)} className="text-slate-500 hover:text-white"><X size={18} /></button>
@@ -2409,10 +2504,10 @@ export default function DashboardCMDB() {
                 const item = allItems.find(candidate => candidate.id === notification.item_id)
                 const client = clients.find(candidate => candidate.id === item?.client_id)
                 return (
-                  <div key={notification.id} className="rounded-xl border border-slate-800 bg-slate-800/40 p-4">
+                  <div key={`${notification.source}-${notification.id}`} className="rounded-xl border border-slate-800 bg-slate-800/40 p-4">
                     <div className="flex flex-col justify-between gap-2 sm:flex-row">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{item?.name ?? 'Deleted license'}</p>
+                        <p className="truncate text-sm font-medium">{item?.name ?? (notification.item_id ? 'Deleted license' : 'Daily renewal summary')}</p>
                         <p className="text-xs text-slate-500">{client?.name ?? 'Unknown client'} · {notification.recipient}</p>
                       </div>
                       <span className={`h-fit rounded-full px-2 py-1 text-[10px] uppercase ${notification.status === 'sent' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>
@@ -2420,12 +2515,12 @@ export default function DashboardCMDB() {
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">
-                      Expiration {notification.expiration_date} · threshold {notification.threshold_days}d · {new Date(notification.sent_at).toLocaleString()}
+                      {notification.detail} · {new Date(notification.sent_at).toLocaleString()}
                     </p>
                     {notification.error && <p className="mt-2 text-xs text-rose-300">{notification.error}</p>}
                     {hasPermission('alerts.configure') && (
                       <button
-                        onClick={() => queueNotificationRetry(notification.id)}
+                        onClick={() => queueNotificationRetry(notification)}
                         className="mt-3 rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600"
                       >
                         Queue for resend

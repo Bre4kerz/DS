@@ -89,6 +89,7 @@ Historial funcional de cambios por ítem utilizado por el modal **History**.
 
 - `cmdb_alert_settings`: configuración global de correos.
 - `cmdb_expiration_notifications`: deduplicación e historial de entregas.
+- `cmdb_renewal_notifications`: entregas deduplicadas del resumen diario, procesos estancados y escalaciones.
 - `cmdb_data_quality_issues`: incidencias detectadas y resueltas.
 
 ### `cmdb_audit_logs`

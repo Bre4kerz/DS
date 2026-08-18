@@ -57,6 +57,7 @@ type FormData = {
   status: string
   process: string
   process_updated_at: string | null
+  process_stale_days: string
   cred_user: string
   cred_password: string
   cred_user_alt: string
@@ -67,7 +68,7 @@ type FormData = {
 const EMPTY: FormData = {
   client_id: '', category: '', item_type: '', name: '',
   domain_version: '', role_use: '', vendor: '', branch: '', qty: '1', ip: '', serial: '', email: '', expiration_date: '', expiration_not_required: false, notes: '',
-  status: 'No date', process: '', process_updated_at: null,
+  status: 'No date', process: '', process_updated_at: null, process_stale_days: '5',
   cred_user: '', cred_password: '', cred_user_alt: '', cred_password_alt: '', cred_notes: ''
 }
 
@@ -210,9 +211,10 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
         expiration_date: item.expiration_date ?? '',
         expiration_not_required: item.expiration_not_required ?? false,
         notes: item.notes ?? '',
-        status: item.expiration_not_required ? 'Not required' : item.status || getItemStatus(item.expiration_date),
+        status: getItemStatus(item.expiration_date, item.expiration_not_required),
         process: item.process ?? '',
         process_updated_at: item.process_updated_at ?? null,
+        process_stale_days: String(item.process_stale_days ?? 5),
         cred_user: '',
         cred_password: '',
         cred_user_alt: '',
@@ -309,13 +311,15 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
       ...itemFields,
       type: form.category,
       qty: Math.max(0, Number.parseInt(form.qty, 10) || 0),
+      process_stale_days: Math.min(365, Math.max(1, Number.parseInt(form.process_stale_days, 10) || 5)),
       expiration_date: form.expiration_date || null,
+      status: getItemStatus(form.expiration_date || null, form.expiration_not_required),
       updated_at: new Date().toISOString(),
     }
     if (item) {
       // Build diff for history
       const changes: Record<string, { from: unknown; to: unknown }> = {}
-      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','vendor','branch','qty','ip','serial','expiration_date','expiration_not_required','status','process','notes']
+      const trackFields: Array<keyof typeof itemFields> = ['name','category','item_type','vendor','branch','qty','ip','serial','expiration_date','expiration_not_required','status','process','process_updated_at','process_stale_days','notes']
       trackFields.forEach(field => {
         const oldVal = item[field] ?? ''
         const newVal = payload[field] ?? ''
@@ -499,17 +503,10 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
 
             {!isLicense && (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs text-slate-400 uppercase tracking-wide">Status</label>
-                    <select value={form.status} onChange={set('status')} disabled={form.expiration_not_required} className={`${SELECT_CLASS} disabled:cursor-not-allowed disabled:opacity-40`} style={SELECT_STYLE}>
-                      <option value="">Select...</option>
-                      <option value="Not required">Not required</option>
-                      <option value="OK">OK</option>
-                      <option value="Expiring">Expiring</option>
-                      <option value="Expired">Expired</option>
-                      <option value="No date">No date</option>
-                    </select>
+                    <label className="text-xs text-slate-400 uppercase tracking-wide">Status (automatic)</label>
+                    <div className={`${SELECT_CLASS} cursor-default`} aria-live="polite">{form.status}</div>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 uppercase tracking-wide">Process</label>
@@ -525,7 +522,30 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
                       <option value="PO processed">PO processed</option>
                       <option value="Waiting for renewal process">Waiting for renewal process</option>
                     </select>
+                    <div className="flex items-center justify-between gap-2 pt-1 text-[10px] text-slate-500">
+                      <span>
+                        {form.process_updated_at
+                          ? `Last follow-up: ${new Date(form.process_updated_at).toLocaleDateString()}`
+                          : 'No follow-up recorded'}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!form.process}
+                        onClick={() => setForm(current => ({ ...current, process_updated_at: new Date().toISOString() }))}
+                        className="shrink-0 text-cyan-300 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Mark follow-up now
+                      </button>
+                    </div>
                   </div>
+                  <Field
+                    label="Stalled after (days)"
+                    value={form.process_stale_days}
+                    onChange={set('process_stale_days')}
+                    type="number"
+                    min={1}
+                    max={365}
+                  />
                 </div>
 
                 <div className="space-y-1.5">
@@ -577,17 +597,10 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
                       No expiration date required
                     </label>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-1.5">
-                        <label className="text-xs text-slate-400 uppercase tracking-wide">Status</label>
-                        <select value={form.status} onChange={set('status')} disabled={form.expiration_not_required} className={`${SELECT_CLASS} disabled:cursor-not-allowed disabled:opacity-40`} style={SELECT_STYLE}>
-                          <option value="">Select...</option>
-                          <option value="Not required">Not required</option>
-                          <option value="OK">OK</option>
-                          <option value="Expiring">Expiring</option>
-                          <option value="Expired">Expired</option>
-                          <option value="No date">No date</option>
-                        </select>
+                        <label className="text-xs text-slate-400 uppercase tracking-wide">Status (automatic)</label>
+                        <div className={`${SELECT_CLASS} cursor-default`} aria-live="polite">{form.status}</div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs text-slate-400 uppercase tracking-wide">Process</label>
@@ -603,7 +616,30 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
                           <option value="PO processed">PO processed</option>
                           <option value="Waiting for renewal process">Waiting for renewal process</option>
                         </select>
+                        <div className="flex items-center justify-between gap-2 pt-1 text-[10px] text-slate-500">
+                          <span>
+                            {form.process_updated_at
+                              ? `Last follow-up: ${new Date(form.process_updated_at).toLocaleDateString()}`
+                              : 'No follow-up recorded'}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={!form.process}
+                            onClick={() => setForm(current => ({ ...current, process_updated_at: new Date().toISOString() }))}
+                            className="shrink-0 text-cyan-300 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Mark follow-up now
+                          </button>
+                        </div>
                       </div>
+                      <Field
+                        label="Stalled after (days)"
+                        value={form.process_stale_days}
+                        onChange={set('process_stale_days')}
+                        type="number"
+                        min={1}
+                        max={365}
+                      />
                     </div>
 
                     <div className="space-y-1.5">
@@ -694,11 +730,11 @@ export default function ItemModal({ item, clients, categories, licenseTypes, can
 }
 
 function Field({
-  label, value, onChange, placeholder, type = 'text', mono, disabled = false
+  label, value, onChange, placeholder, type = 'text', mono, disabled = false, min, max
 }: {
   label: string; value: string
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  placeholder?: string; type?: string; mono?: boolean; disabled?: boolean
+  placeholder?: string; type?: string; mono?: boolean; disabled?: boolean; min?: number; max?: number
 }) {
   return (
     <div className="space-y-1.5">
@@ -709,6 +745,8 @@ function Field({
         onChange={onChange}
         placeholder={placeholder}
         disabled={disabled}
+        min={min}
+        max={max}
         className={`w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mono ? 'font-mono' : ''}`}
       />
     </div>

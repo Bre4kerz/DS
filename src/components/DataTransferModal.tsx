@@ -55,6 +55,7 @@ export default function DataTransferModal({ clients, items, canImport, onClose, 
         expiration_date: item.expiration_date ?? '',
         notes: item.notes ?? '',
         process: item.process ?? '',
+        process_stale_days: String(item.process_stale_days ?? 5),
       }
       return COLUMNS.map(column => escapeCsv(row[column])).join(',')
     })
@@ -112,6 +113,8 @@ export default function DataTransferModal({ clients, items, canImport, onClose, 
           expiration_date: row.expiration_date || null,
           notes: row.notes,
           process: row.process,
+          process_updated_at: row.process ? new Date().toISOString() : null,
+          process_stale_days: Math.min(365, Math.max(1, Number.parseInt(row.process_stale_days, 10) || 5)),
           updated_at: new Date().toISOString(),
         }]
       })
