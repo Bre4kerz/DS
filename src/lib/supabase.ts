@@ -139,6 +139,17 @@ export type CredentialBulkField =
   | 'alternative_username'
   | 'alternative_password'
 
+export type ItemBulkField =
+  | 'item_type'
+  | 'domain_version'
+  | 'role_use'
+  | 'vendor'
+  | 'branch'
+  | 'ip'
+  | 'serial'
+  | 'email'
+  | 'process'
+
 export function hasCredentials(item: CmdbItem): boolean {
   return item.has_credentials === true
 }
@@ -200,6 +211,54 @@ export async function bulkReplaceCredentials({
   })
   if (error) throw error
   return typeof data === 'number' ? data : Number(data ?? 0)
+}
+
+export async function bulkReplaceItemField({
+  clientId,
+  category,
+  field,
+  oldValue,
+  newValue,
+  preview,
+}: {
+  clientId: string
+  category: string
+  field: ItemBulkField
+  oldValue: string
+  newValue: string
+  preview: boolean
+}): Promise<number> {
+  const { data, error } = await supabase.rpc('bulk_replace_cmdb_item_field_authorized', {
+    p_client_id: clientId,
+    p_category: category,
+    p_field: field,
+    p_old_value: oldValue,
+    p_new_value: newValue,
+    p_preview: preview,
+  })
+  if (error) throw error
+  return typeof data === 'number' ? data : Number(data ?? 0)
+}
+
+export async function bulkDeleteItems({
+  clientId,
+  category,
+  itemIds,
+}: {
+  clientId: string
+  category: string
+  itemIds: string[]
+}): Promise<number> {
+  if (itemIds.length === 0) return 0
+  const { data, error } = await supabase
+    .from('cmdb_items')
+    .delete()
+    .eq('client_id', clientId)
+    .eq('category', category)
+    .in('id', itemIds)
+    .select('id')
+  if (error) throw error
+  return data?.length ?? 0
 }
 
 export function groupItemsByCategory(items: CmdbItem[]): SectionData[] {

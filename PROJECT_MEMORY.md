@@ -62,6 +62,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 **Actualización 2026-08-04:** se añadió `data.transfer` y `quality.configure`, plantillas de permisos, sincronización Realtime, importación/exportación CSV con validación, historial de entregas con cola de reenvío, reglas/filtros de calidad, pruebas Vitest/SQL y carga diferida. `20260804_add_quality_rules_and_data_transfer.sql` debe aplicarse después de `20260803`, y la Edge Function debe volver a desplegarse.
 
+**Pendiente — correo de proceso de renovación estancado:** enriquecer el aviso con cliente/licencia, vencimiento y días restantes, proceso actual, días detenido, fecha del último seguimiento, responsable asignado, enlace directo al registro y acción recomendada. Los primeros cuatro datos ya están incluidos. Para terminarlo habrá que agregar responsable de renovación al esquema, configurar la URL base del dashboard y definir la recomendación correspondiente a cada etapa.
+
 ## Fortalezas
 
 - Separación inicial de autenticación, utilidades y algunos hooks.

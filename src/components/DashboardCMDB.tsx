@@ -1,4 +1,5 @@
-import { Fragment, Suspense, lazy, useEffect, useState, useMemo } from 'react'
+import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../contexts/AuthContext'
 import logoImg from '../assets/logo1.png'
 import {
@@ -6,13 +7,13 @@ import {
   Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
   AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
   Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList,
-  Moon, Sun, ArrowUpDown, Send
+  ArrowUpDown, Send, Menu, Moon, Sun, MoreHorizontal, SlidersHorizontal
 } from 'lucide-react'
 import {
   supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
   ClientSummary, SectionData,
   hasCredentials, revealCredentials, Credentials, bulkReplaceCredentials,
-  type CredentialBulkField
+  bulkReplaceItemField, bulkDeleteItems, type CredentialBulkField, type ItemBulkField
 } from '../lib/supabase'
 import ItemModal from './ItemModal'
 import { CMDB_PERMISSION_KEYS, useCmdbData, type CmdbPermission } from '../hooks/useCmdbData'
@@ -172,7 +173,6 @@ function ThemeToggle({ userId }: { userId: string }) {
   const [theme, setTheme] = useState<ThemeMode>(() =>
     localStorage.getItem(`cmdb-theme:${userId}`) === 'light' ? 'light' : 'dark',
   )
-
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem(`cmdb-theme:${userId}`, theme)
@@ -189,17 +189,15 @@ function ThemeToggle({ userId }: { userId: string }) {
       aria-label={theme === 'dark' ? 'Activate light mode' : 'Activate dark mode'}
       title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
       onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
-      className="relative flex h-9 w-[68px] items-center rounded-full border border-slate-700 bg-slate-900 px-1 transition-colors"
+      className={`day-night-switch day-night-switch-${theme}`}
     >
-      <Moon size={13} className={`absolute left-2 transition-opacity ${theme === 'dark' ? 'opacity-100 text-cyan-300' : 'opacity-40 text-slate-500'}`} />
-      <Sun size={13} className={`absolute right-2 transition-opacity ${theme === 'light' ? 'opacity-100 text-amber-500' : 'opacity-40 text-slate-500'}`} />
-      <span
-        className={`h-7 w-7 rounded-full shadow-md transition-transform duration-200 ${
-          theme === 'light'
-            ? 'translate-x-[31px] bg-amber-400'
-            : 'translate-x-0 bg-cyan-600'
-        }`}
-      />
+      <span className="day-night-switch-icon day-night-switch-moon" aria-hidden="true">
+        <Moon size={17} strokeWidth={2.4} />
+      </span>
+      <span className="day-night-switch-icon day-night-switch-sun" aria-hidden="true">
+        <Sun size={17} strokeWidth={2.4} />
+      </span>
+      <span className="day-night-switch-thumb" aria-hidden="true" />
     </button>
   )
 }
@@ -317,6 +315,56 @@ type AuditLog = {
   old_data: Record<string, unknown> | null
   new_data: Record<string, unknown> | null
   metadata: Record<string, unknown>
+}
+
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  insert: 'Created',
+  create: 'Created',
+  update: 'Updated',
+  delete: 'Deleted',
+  access: 'Accessed',
+  reveal: 'Revealed',
+  login: 'Signed in',
+  logout: 'Signed out',
+}
+
+const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  cmdb_credential_access_log: 'Credential access',
+  cmdb_items: 'CMDB record',
+  cmdb_clients: 'Client',
+  cmdb_user_roles: 'User role',
+  cmdb_role_permissions: 'Role permission',
+}
+
+const formatAuditEntity = (entityType: string | null) => {
+  if (!entityType) return 'Session'
+  if (AUDIT_ENTITY_LABELS[entityType]) return AUDIT_ENTITY_LABELS[entityType]
+  const label = entityType.replace(/^cmdb_/, '').replace(/_/g, ' ').trim()
+  return label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : 'Record'
+}
+
+const getAuditPresentation = (log: AuditLog) => {
+  const normalizedAction = log.action.toLowerCase()
+  const action = AUDIT_ACTION_LABELS[normalizedAction] ??
+    `${log.action.charAt(0).toUpperCase()}${log.action.slice(1).replace(/_/g, ' ')}`
+  const entity = formatAuditEntity(log.entity_type)
+  const normalizedSummary = log.summary.trim().toLowerCase()
+  const isGeneratedSummary = normalizedSummary.startsWith(`${normalizedAction} on `) && normalizedSummary.includes(':')
+  const isCredentialAccess = log.entity_type === 'cmdb_credential_access_log'
+  const title = isGeneratedSummary
+    ? isCredentialAccess
+      ? 'Credential accessed'
+      : `${action} ${entity.toLowerCase()}`
+    : log.summary
+
+  const entityName = log.entity_name?.trim()
+  const context = !isGeneratedSummary
+    ? [entity, action].filter(value => !title.toLowerCase().includes(value.toLowerCase())).join(' · ')
+    : entityName && entityName !== log.entity_id && !/^\d+$/.test(entityName)
+      ? entityName
+      : ''
+
+  return { title, context }
 }
 
 type ExpirationNotification = {
@@ -622,7 +670,503 @@ function BulkCredentialReplaceModal({ clientId, clientName, category, onClose, o
   )
 }
 
-function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit = false, canDelete = false, canViewCredentials = false, canEditCredentials = false, canViewHistory = false, highlightedItemId, onOpenChange, onAdd, onEdit, onDelete, onDuplicate, onHistory, onBulkReplaceCredentials }: {
+const BULK_ITEM_FIELDS: Array<{ value: ItemBulkField; label: string }> = [
+  { value: 'item_type', label: 'Type' },
+  { value: 'domain_version', label: 'Domain / Version' },
+  { value: 'role_use', label: 'Usage / Role' },
+  { value: 'vendor', label: 'Vendor' },
+  { value: 'branch', label: 'Branch' },
+  { value: 'ip', label: 'IP / ID' },
+  { value: 'serial', label: 'Serial / License' },
+  { value: 'email', label: 'Email' },
+  { value: 'process', label: 'Process' },
+]
+
+function BulkItemReplaceModal({ clientId, clientName, category, onClose, onCompleted }: {
+  clientId: string
+  clientName: string
+  category: string
+  onClose: () => void
+  onCompleted: () => void | Promise<void>
+}) {
+  const [field, setField] = useState<ItemBulkField>('item_type')
+  const [oldValue, setOldValue] = useState('')
+  const [newValue, setNewValue] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [clearConfirmed, setClearConfirmed] = useState(false)
+  const [previewCount, setPreviewCount] = useState<number | null>(null)
+  const [updatedCount, setUpdatedCount] = useState<number | null>(null)
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+  const isClearing = oldValue.length > 0 && newValue.length === 0
+  const valuesValid = oldValue !== newValue && (
+    isClearing ? clearConfirmed : newValue.trim().length > 0 && newValue === confirmation
+  )
+
+  const resetPreview = () => {
+    setPreviewCount(null)
+    setUpdatedCount(null)
+    setError('')
+  }
+
+  const runReplacement = async (preview: boolean) => {
+    if (!valuesValid) return
+    setWorking(true)
+    setError('')
+    try {
+      const count = await bulkReplaceItemField({
+        clientId,
+        category,
+        field,
+        oldValue,
+        newValue,
+        preview,
+      })
+      if (preview) {
+        setPreviewCount(count)
+      } else {
+        setUpdatedCount(count)
+        setOldValue('')
+        setNewValue('')
+        setConfirmation('')
+        setClearConfirmed(false)
+        setPreviewCount(null)
+        await onCompleted()
+      }
+    } catch (replacementError) {
+      setError(replacementError instanceof Error ? replacementError.message : 'Could not update the records')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!working) onClose() }}>
+      <div className="modal-surface w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5">
+          <div>
+            <div className="flex items-center gap-2 text-violet-300">
+              <ArrowUpDown size={20} />
+              <h3 className="text-lg font-semibold text-white">Bulk edit records</h3>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">{clientName} · {category}</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={working} className="rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-white disabled:opacity-40" aria-label="Close bulk record editing">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-5">
+          {updatedCount !== null ? (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
+              <CheckCircle size={28} className="mx-auto text-emerald-300" />
+              <p className="mt-2 font-medium text-emerald-300">Bulk update completed</p>
+              <p className="mt-1 text-sm text-slate-400">{updatedCount} record(s) updated.</p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Field to update</label>
+                <select
+                  value={field}
+                  onChange={event => {
+                    setField(event.target.value as ItemBulkField)
+                    setOldValue('')
+                    setNewValue('')
+                    setConfirmation('')
+                    setClearConfirmed(false)
+                    resetPreview()
+                  }}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+                >
+                  {BULK_ITEM_FIELDS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {[{
+                label: 'Current value', helper: 'Leave empty to match records with no value.', value: oldValue, setter: setOldValue,
+              }, {
+                label: 'New value', helper: '', value: newValue, setter: setNewValue,
+              }].map(input => (
+                <div key={input.label}>
+                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">{input.label}</label>
+                  <input
+                    type="text"
+                    value={input.value}
+                    onChange={event => {
+                      input.setter(event.target.value)
+                      setClearConfirmed(false)
+                      resetPreview()
+                    }}
+                    autoComplete="off"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+                  />
+                  {input.helper && <p className="mt-1 text-[10px] text-slate-500">{input.helper}</p>}
+                </div>
+              ))}
+
+              {isClearing ? (
+                <label className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                  <input
+                    type="checkbox"
+                    checked={clearConfirmed}
+                    onChange={event => {
+                      setClearConfirmed(event.target.checked)
+                      resetPreview()
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block font-medium">Clear this field</span>
+                    <span className="mt-0.5 block text-[11px] opacity-75">Matching records will keep the field empty.</span>
+                  </span>
+                </label>
+              ) : (
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Confirm new value</label>
+                  <input
+                    type="text"
+                    value={confirmation}
+                    onChange={event => {
+                      setConfirmation(event.target.value)
+                      resetPreview()
+                    }}
+                    autoComplete="off"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
+                  />
+                </div>
+              )}
+
+              {!isClearing && confirmation && confirmation !== newValue && (
+                <p className="text-xs text-rose-400">The new values do not match.</p>
+              )}
+              {newValue && oldValue === newValue && (
+                <p className="text-xs text-amber-300">The new value must be different.</p>
+              )}
+              {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">{error}</p>}
+              {previewCount !== null && (
+                <div className={`rounded-xl border p-3 text-sm ${
+                  previewCount > 0
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                    : 'border-slate-700 bg-slate-800/50 text-slate-400'
+                }`}>
+                  {previewCount > 0
+                    ? `${previewCount} exact match(es) found. Review the scope before updating.`
+                    : 'No exact matches were found in this client and category.'}
+                </div>
+              )}
+
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                Only exact matches in this client and category are affected. Every changed record is added to its history.
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-slate-800 p-4">
+          {updatedCount !== null ? (
+            <button type="button" onClick={onClose} className="rounded-xl bg-violet-600 px-4 py-2 text-sm hover:bg-violet-500">Done</button>
+          ) : (
+            <>
+              <button type="button" onClick={onClose} disabled={working} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 disabled:opacity-40">Cancel</button>
+              <button type="button" onClick={() => void runReplacement(true)} disabled={!valuesValid || working} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-300 disabled:opacity-40">
+                {working ? 'Checking…' : 'Check matches'}
+              </button>
+              <button type="button" onClick={() => void runReplacement(false)} disabled={!valuesValid || working || !previewCount} className="rounded-xl bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-500 disabled:opacity-40">
+                {isClearing ? 'Clear' : 'Update'} {previewCount ?? 0} record(s)
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BulkDeleteItemsModal({ clientId, clientName, category, items, onClose, onCompleted }: {
+  clientId: string
+  clientName: string
+  category: string
+  items: CmdbItem[]
+  onClose: () => void
+  onCompleted: () => void | Promise<void>
+}) {
+  const [search, setSearch] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmation, setConfirmation] = useState('')
+  const [working, setWorking] = useState(false)
+  const [deletedCount, setDeletedCount] = useState<number | null>(null)
+  const [error, setError] = useState('')
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return items
+    return items.filter(item => [item.name, item.item_type, item.domain_version, item.ip, item.serial]
+      .some(value => value?.toLowerCase().includes(query)))
+  }, [items, search])
+  const expectedConfirmation = `DELETE ${selectedIds.size}`
+  const allVisibleSelected = filteredItems.length > 0 && filteredItems.every(item => selectedIds.has(item.id))
+
+  const toggleItem = (itemId: string) => {
+    setSelectedIds(previous => {
+      const next = new Set(previous)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
+    setConfirmation('')
+    setError('')
+  }
+
+  const toggleVisible = () => {
+    setSelectedIds(previous => {
+      const next = new Set(previous)
+      if (allVisibleSelected) filteredItems.forEach(item => next.delete(item.id))
+      else filteredItems.forEach(item => next.add(item.id))
+      return next
+    })
+    setConfirmation('')
+    setError('')
+  }
+
+  const deleteSelected = async () => {
+    if (selectedIds.size === 0 || confirmation !== expectedConfirmation) return
+    setWorking(true)
+    setError('')
+    try {
+      const count = await bulkDeleteItems({
+        clientId,
+        category,
+        itemIds: Array.from(selectedIds),
+      })
+      setDeletedCount(count)
+      await onCompleted()
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Could not delete the selected records')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!working) onClose() }}>
+      <div className="modal-surface flex max-h-[86vh] w-full max-w-xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5">
+          <div>
+            <div className="flex items-center gap-2 text-rose-300">
+              <Trash2 size={20} />
+              <h3 className="text-lg font-semibold text-white">Delete multiple records</h3>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">{clientName} · {category}</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={working} className="rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-white disabled:opacity-40" aria-label="Close bulk deletion">
+            <X size={18} />
+          </button>
+        </div>
+
+        {deletedCount !== null ? (
+          <div className="p-5">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-center">
+              <CheckCircle size={30} className="mx-auto text-emerald-300" />
+              <p className="mt-2 font-medium text-emerald-300">Deletion completed</p>
+              <p className="mt-1 text-sm text-slate-400">{deletedCount} record(s) deleted.</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="border-b border-slate-800 p-4">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3">
+                <Search size={14} className="text-slate-500" />
+                <input
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                  placeholder="Search records..."
+                  className="w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-600"
+                />
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <button
+                type="button"
+                onClick={toggleVisible}
+                disabled={filteredItems.length === 0}
+                className="mb-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-400 hover:bg-slate-800/60 disabled:opacity-40"
+              >
+                <input type="checkbox" checked={allVisibleSelected} readOnly className="pointer-events-none" />
+                <span>{allVisibleSelected ? 'Clear visible selection' : `Select all visible (${filteredItems.length})`}</span>
+              </button>
+
+              <div className="space-y-1.5">
+                {filteredItems.map(item => (
+                  <label key={item.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
+                    selectedIds.has(item.id)
+                      ? 'border-rose-500/35 bg-rose-500/10'
+                      : 'border-slate-800 bg-slate-950/40 hover:border-slate-700 hover:bg-slate-800/40'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleItem(item.id)}
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-white">{item.name || 'Unnamed record'}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                        {[item.item_type, item.domain_version || item.ip].filter(Boolean).join(' · ') || 'No additional details'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+                {filteredItems.length === 0 && (
+                  <p className="py-8 text-center text-sm text-slate-500">No records match this search.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-3 border-t border-slate-800 p-4">
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                This permanently deletes {selectedIds.size} selected record(s), including their stored credentials and history.
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                  Type <span className="font-mono text-rose-300">{expectedConfirmation}</span> to confirm
+                </label>
+                <input
+                  value={confirmation}
+                  onChange={event => setConfirmation(event.target.value)}
+                  disabled={selectedIds.size === 0}
+                  autoComplete="off"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-rose-500 disabled:opacity-40"
+                />
+              </div>
+              {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">{error}</p>}
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 border-t border-slate-800 p-4">
+          {deletedCount !== null ? (
+            <button type="button" onClick={onClose} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm hover:bg-cyan-500">Done</button>
+          ) : (
+            <>
+              <button type="button" onClick={onClose} disabled={working} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 disabled:opacity-40">Cancel</button>
+              <button
+                type="button"
+                onClick={() => void deleteSelected()}
+                disabled={selectedIds.size === 0 || confirmation !== expectedConfirmation || working}
+                className="rounded-xl bg-rose-600 px-4 py-2 text-sm text-white hover:bg-rose-500 disabled:opacity-40"
+              >
+                {working ? 'Deleting…' : `Delete ${selectedIds.size} record(s)`}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type SectionColumnKey = 'type' | 'primaryDetail' | 'secondaryDetail' | 'identifier' | 'status' | 'process'
+
+const DEFAULT_SECTION_COLUMNS: Record<SectionColumnKey, boolean> = {
+  type: true,
+  primaryDetail: true,
+  secondaryDetail: true,
+  identifier: true,
+  status: true,
+  process: true,
+}
+
+function ColumnVisibilityMenu({ options, visible, onToggle }: {
+  options: Array<{ key: SectionColumnKey; label: string }>
+  visible: Record<SectionColumnKey, boolean>
+  onToggle: (key: SectionColumnKey) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState({ top: 0, left: 0 })
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const closeIfOutside = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    const closeMenu = () => setOpen(false)
+    document.addEventListener('pointerdown', closeIfOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeIfOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [open])
+
+  const toggleMenu = () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect) {
+      const estimatedHeight = options.length * 38 + 16
+      const opensUpward = window.innerHeight - rect.bottom < estimatedHeight + 16
+      setPosition({
+        top: opensUpward ? Math.max(8, rect.top - estimatedHeight - 8) : rect.bottom + 8,
+        left: Math.max(12, rect.right - 208),
+      })
+    }
+    setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={toggleMenu}
+        className="flex items-center gap-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-1 text-[11px] text-slate-400 transition-colors hover:border-slate-600 hover:text-white"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <SlidersHorizontal size={12} />
+        Columns
+      </button>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Visible columns"
+          className="section-actions-menu fixed z-[70] w-52 rounded-xl border p-1.5 shadow-2xl backdrop-blur-md"
+          style={{ top: position.top, left: position.left }}
+        >
+          {options.map(option => (
+            <label key={option.key} className="column-visibility-item flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-xs transition-colors">
+              <input
+                type="checkbox"
+                checked={visible[option.key]}
+                onChange={() => onToggle(option.key)}
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit = false, canDelete = false, canViewCredentials = false, canEditCredentials = false, canViewHistory = false, highlightedItemId, onOpenChange, onAdd, onEdit, onDelete, onDuplicate, onHistory, onBulkReplaceCredentials, onBulkReplaceItems, onBulkDeleteItems }: {
   section: SectionData
   defaultOpen?: boolean
   canCreate?: boolean
@@ -639,15 +1183,39 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
   onDuplicate: (item: CmdbItem) => void
   onHistory: (item: CmdbItem) => void
   onBulkReplaceCredentials: (category: string) => void
+  onBulkReplaceItems: (category: string) => void
+  onBulkDeleteItems: (category: string, items: CmdbItem[]) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
+  const [credentialMenuOpen, setCredentialMenuOpen] = useState(false)
+  const [credentialMenuPosition, setCredentialMenuPosition] = useState({ top: 0, left: 0 })
+  const credentialMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const credentialMenuRef = useRef<HTMLDivElement>(null)
   const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
   const categoryStyle = CATEGORY_STYLES[section.title] || DEFAULT_CATEGORY_STYLE
   const isLicenseSection = section.title === 'Licenses'
+  const [visibleColumns, setVisibleColumns] = useState<Record<SectionColumnKey, boolean>>(() => {
+    const categoryDefaults = { ...DEFAULT_SECTION_COLUMNS, status: isLicenseSection }
+    try {
+      const stored = localStorage.getItem(`cmdb-section-columns:v2:${section.title}`)
+      return stored ? { ...categoryDefaults, ...JSON.parse(stored) } : categoryDefaults
+    } catch {
+      return categoryDefaults
+    }
+  })
   const hasExpiring = section.rows.some(r => r.status === 'Expiring' || r.status === 'Expired')
   const hasCreds = canViewCredentials && section.rows.some(r => hasCredentials(r.item))
+  const columnOptions: Array<{ key: SectionColumnKey; label: string }> = [
+    { key: 'type', label: 'Type' },
+    { key: 'primaryDetail', label: isLicenseSection ? 'Vendor' : 'Domain / Version' },
+    { key: 'secondaryDetail', label: isLicenseSection ? 'Branch' : 'Usage / Roles' },
+    { key: 'identifier', label: isLicenseSection ? 'Serial / License' : 'IP / ID' },
+    { key: 'status', label: 'Status' },
+    ...(isLicenseSection ? [{ key: 'process' as const, label: 'Process' }] : []),
+  ]
+  const visibleColumnCount = 3 + columnOptions.filter(option => visibleColumns[option.key]).length
 
   const sortedRows = [...section.rows].sort((a, b) => {
     switch (sortBy) {
@@ -686,6 +1254,49 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
     setOpen(defaultOpen)
   }, [defaultOpen])
 
+  useEffect(() => {
+    localStorage.setItem(`cmdb-section-columns:v2:${section.title}`, JSON.stringify(visibleColumns))
+  }, [section.title, visibleColumns])
+
+  useEffect(() => {
+    if (!credentialMenuOpen) return
+
+    const closeIfOutside = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!credentialMenuButtonRef.current?.contains(target) && !credentialMenuRef.current?.contains(target)) {
+        setCredentialMenuOpen(false)
+      }
+    }
+    const closeMenu = () => setCredentialMenuOpen(false)
+
+    document.addEventListener('pointerdown', closeIfOutside)
+    window.addEventListener('resize', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeIfOutside)
+      window.removeEventListener('resize', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [credentialMenuOpen])
+
+  const toggleCredentialMenu = () => {
+    if (credentialMenuOpen) {
+      setCredentialMenuOpen(false)
+      return
+    }
+    const rect = credentialMenuButtonRef.current?.getBoundingClientRect()
+    if (rect) {
+      const actionCount = Number(canEdit) + Number(canEdit && canEditCredentials && hasCreds) + Number(canDelete)
+      const estimatedMenuHeight = actionCount * 58 + 12
+      const opensUpward = window.innerHeight - rect.bottom < estimatedMenuHeight + 16
+      setCredentialMenuPosition({
+        top: opensUpward ? Math.max(8, rect.top - estimatedMenuHeight - 8) : rect.bottom + 8,
+        left: Math.max(12, rect.right - 208),
+      })
+    }
+    setCredentialMenuOpen(true)
+  }
+
   return (
     <div
       className={`category-card overflow-hidden rounded-2xl border ${categoryStyle.border} ${
@@ -721,17 +1332,6 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
               Check expirations
             </span>
           )}
-          {canEdit && canEditCredentials && hasCreds && (
-            <button
-              type="button"
-              onClick={() => onBulkReplaceCredentials(section.title)}
-              className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
-              title={`Replace credential values in ${section.title}`}
-            >
-              <KeyRound size={13} />
-              <span className="hidden lg:inline">Replace credentials</span>
-            </button>
-          )}
           {canCreate && (
             <button
               type="button"
@@ -741,6 +1341,20 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
             >
               <Plus size={13} />
               <span className="hidden sm:inline">Add</span>
+            </button>
+          )}
+          {(canEdit || canDelete) && (
+            <button
+              ref={credentialMenuButtonRef}
+              type="button"
+              onClick={toggleCredentialMenu}
+              className="rounded-lg border border-slate-700/60 p-1.5 text-slate-400 transition-colors hover:border-slate-600 hover:bg-slate-800/70 hover:text-white"
+              aria-label={`More actions for ${section.title}`}
+              aria-haspopup="menu"
+              aria-expanded={credentialMenuOpen}
+              title="More actions"
+            >
+              <MoreHorizontal size={16} />
             </button>
           )}
           <button type="button" onClick={toggleSection} className="rounded-lg p-1 hover:bg-slate-700/50" aria-label={open ? `Collapse ${section.title}` : `Expand ${section.title}`}>
@@ -756,16 +1370,23 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
             <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">
               Detalle de records
             </p>
-            <select
-              value={sortBy}
-              onChange={e => setSortBy(e.target.value as typeof sortBy)}
-              className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-2.5 py-1 text-[11px] text-slate-400 outline-none cursor-pointer hover:border-slate-600 transition-colors"
-            >
-              <option value="name-asc">Name A-Z</option>
-              <option value="name-desc">Name Z-A</option>
-              <option value="type-asc">Type A-Z</option>
-              <option value="type-desc">Type Z-A</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <ColumnVisibilityMenu
+                options={columnOptions}
+                visible={visibleColumns}
+                onToggle={key => setVisibleColumns(previous => ({ ...previous, [key]: !previous[key] }))}
+              />
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-2.5 py-1 text-[11px] text-slate-400 outline-none cursor-pointer hover:border-slate-600 transition-colors"
+              >
+                <option value="name-asc">Name A-Z</option>
+                <option value="name-desc">Name Z-A</option>
+                <option value="type-asc">Type A-Z</option>
+                <option value="type-desc">Type Z-A</option>
+              </select>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -773,13 +1394,13 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
               <thead>
                 <tr className="border-b border-slate-800/60 text-[10px] uppercase tracking-wider text-slate-500">
                   <th className="px-5 py-2.5 text-left font-medium w-10"></th>
-                  <th className="px-3 py-2.5 text-left font-medium">Type</th>
+                  {visibleColumns.type && <th className="px-3 py-2.5 text-left font-medium">Type</th>}
                   <th className="px-3 py-2.5 text-left font-medium">Name</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">{isLicenseSection ? 'Vendor' : 'Domain / Version'}</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">{isLicenseSection ? 'Branch' : 'Usage / Roles'}</th>
-                  <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">{isLicenseSection ? 'Serial / License' : 'IP / ID'}</th>
-                  <th className="w-32 whitespace-nowrap px-3 py-2.5 text-left font-medium">Status</th>
-                  {isLicenseSection && <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Process</th>}
+                  {visibleColumns.primaryDetail && <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">{isLicenseSection ? 'Vendor' : 'Domain / Version'}</th>}
+                  {visibleColumns.secondaryDetail && <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">{isLicenseSection ? 'Branch' : 'Usage / Roles'}</th>}
+                  {visibleColumns.identifier && <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">{isLicenseSection ? 'Serial / License' : 'IP / ID'}</th>}
+                  {visibleColumns.status && <th className="w-32 whitespace-nowrap px-3 py-2.5 text-left font-medium">Status</th>}
+                  {isLicenseSection && visibleColumns.process && <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Process</th>}
                   <th className="px-5 py-2.5 text-right font-medium w-32">Actions</th>
                 </tr>
               </thead>
@@ -829,9 +1450,9 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
                           )}
                         </td>
 
-                        <td className="px-3 py-3">
+                        {visibleColumns.type && <td className="px-3 py-3">
                           <span className="text-slate-400 text-[12px]">{row.type || '—'}</span>
-                        </td>
+                        </td>}
 
                         <td className="px-3 py-3">
                           <div>
@@ -859,27 +1480,27 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
                           </div>
                         </td>
 
-                        <td className="px-3 py-3 hidden md:table-cell">
+                        {visibleColumns.primaryDetail && <td className="px-3 py-3 hidden md:table-cell">
                           <span className="text-slate-400 text-[12px]">{isLicenseSection ? row.item.vendor || '—' : row.domain || '—'}</span>
-                        </td>
+                        </td>}
 
-                        <td className="px-3 py-3 hidden lg:table-cell">
+                        {visibleColumns.secondaryDetail && <td className="px-3 py-3 hidden lg:table-cell">
                           <span className="text-slate-500 text-[11px]">{isLicenseSection ? row.item.branch || '—' : row.role || '—'}</span>
-                        </td>
+                        </td>}
 
-                        <td className="px-3 py-3 hidden sm:table-cell">
+                        {visibleColumns.identifier && <td className="px-3 py-3 hidden sm:table-cell">
                           {isLicenseSection ? (
                             <SensitiveCopyableValue value={row.item.serial ?? ''} label="serial or license" />
                           ) : (
                             <CopyableValue value={row.ip} label="IP" />
                           )}
-                        </td>
+                        </td>}
 
-                        <td className="px-3 py-3">
+                        {visibleColumns.status && <td className="px-3 py-3">
                           <StatusPill status={row.status} />
-                        </td>
+                        </td>}
 
-                        {isLicenseSection && (
+                        {isLicenseSection && visibleColumns.process && (
                           <td className="hidden max-w-[220px] px-3 py-3 lg:table-cell">
                             {row.item.process ? (
                               <div title={row.item.process}>
@@ -949,7 +1570,7 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
 
                       {isExpanded && creds && (
                         <tr>
-                          <td colSpan={isLicenseSection ? 9 : 8} className="px-0 py-0">
+                          <td colSpan={visibleColumnCount} className="px-0 py-0">
                             <div className="bg-slate-950/40 border-t border-slate-800/30 px-5 py-4">
                               <div className="flex items-center gap-2 mb-3">
                                 <Lock size={13} className="text-yellow-400/80" />
@@ -974,6 +1595,69 @@ function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit 
             </div>
           )}
         </div>
+      )}
+
+      {credentialMenuOpen && createPortal(
+        <div
+          ref={credentialMenuRef}
+          role="menu"
+          aria-label={`Actions for ${section.title}`}
+          className="section-actions-menu fixed z-[70] w-52 rounded-xl border p-1.5 shadow-2xl backdrop-blur-md"
+          style={{ top: credentialMenuPosition.top, left: credentialMenuPosition.left }}
+        >
+          {canEdit && (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setCredentialMenuOpen(false)
+              onBulkReplaceItems(section.title)
+            }}
+            className="section-actions-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-colors"
+          >
+            <ArrowUpDown size={14} />
+            <span>
+              <span className="block">Bulk edit records</span>
+              <span className="mt-0.5 block text-[10px] font-normal opacity-60">Replace matching field values</span>
+            </span>
+          </button>
+          )}
+          {canEdit && canEditCredentials && hasCreds && (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setCredentialMenuOpen(false)
+              onBulkReplaceCredentials(section.title)
+            }}
+            className="section-actions-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-colors"
+          >
+            <KeyRound size={14} />
+            <span>
+              <span className="block">Replace credentials</span>
+              <span className="mt-0.5 block text-[10px] font-normal opacity-60">Update matching values in bulk</span>
+            </span>
+          </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setCredentialMenuOpen(false)
+                onBulkDeleteItems(section.title, section.rows.map(row => row.item))
+              }}
+              className="section-actions-menu-item section-actions-menu-item-danger flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-colors"
+            >
+              <Trash2 size={14} />
+              <span>
+                <span className="block">Delete multiple records</span>
+                <span className="mt-0.5 block text-[10px] font-normal opacity-60">Select records to remove</span>
+              </span>
+            </button>
+          )}
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -1021,6 +1705,22 @@ export default function DashboardCMDB() {
     deleteRole: removeRole,
   } = useCmdbData(user)
   const [search, setSearch] = useState('')
+  const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [actionMenuMounted, setActionMenuMounted] = useState(false)
+  const actionMenuRef = useRef<HTMLDivElement>(null)
+  const themeControlRef = useRef<HTMLDivElement>(null)
+  const refreshControlRef = useRef<HTMLDivElement>(null)
+  const headerControlPositionsRef = useRef<Array<{ element: HTMLElement; left: number; top: number }>>([])
+  const headerControlAnimationsRef = useRef<Animation[]>([])
+
+  const captureHeaderControlPositions = useCallback(() => {
+    headerControlPositionsRef.current = [themeControlRef.current, refreshControlRef.current]
+      .filter((element): element is HTMLDivElement => element !== null)
+      .map(element => {
+        const rect = element.getBoundingClientRect()
+        return { element, left: rect.left, top: rect.top }
+      })
+  }, [])
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<Set<string>>(
@@ -1042,6 +1742,17 @@ export default function DashboardCMDB() {
     clientId: string
     clientName: string
     category: string
+  } | null>(null)
+  const [bulkItemScope, setBulkItemScope] = useState<{
+    clientId: string
+    clientName: string
+    category: string
+  } | null>(null)
+  const [bulkDeleteScope, setBulkDeleteScope] = useState<{
+    clientId: string
+    clientName: string
+    category: string
+    items: CmdbItem[]
   } | null>(null)
   const [rolePermissions, setRolePermissions] = useState<Record<string, Set<CmdbPermission>>>({})
   const [roleCategoryAccess, setRoleCategoryAccess] = useState<Record<string, Record<string, { view: boolean; edit: boolean }>>>({})
@@ -1706,6 +2417,60 @@ export default function DashboardCMDB() {
     if (!loading) fetchQualityIssues()
   }, [loading])
 
+  useEffect(() => {
+    if (actionMenuOpen) {
+      setActionMenuMounted(true)
+      return
+    }
+    if (!actionMenuMounted) return
+    const unmountTimer = window.setTimeout(() => {
+      captureHeaderControlPositions()
+      setActionMenuMounted(false)
+    }, 220)
+    return () => window.clearTimeout(unmountTimer)
+  }, [actionMenuOpen, actionMenuMounted, captureHeaderControlPositions])
+
+  useLayoutEffect(() => {
+    const previousPositions = headerControlPositionsRef.current
+    if (previousPositions.length === 0) return
+    headerControlAnimationsRef.current.forEach(animation => animation.cancel())
+    headerControlAnimationsRef.current = []
+
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      headerControlAnimationsRef.current = previousPositions.flatMap(({ element, left, top }) => {
+        const currentRect = element.getBoundingClientRect()
+        const deltaX = left - currentRect.left
+        const deltaY = top - currentRect.top
+        if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) return []
+        return [element.animate(
+          [
+            { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` },
+            { transform: 'translate3d(0, 0, 0)' },
+          ],
+          { duration: 360, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'both' },
+        )]
+      })
+    }
+
+    headerControlPositionsRef.current = []
+  }, [actionMenuMounted])
+
+  useEffect(() => {
+    if (!actionMenuOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActionMenuOpen(false)
+    }
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!actionMenuRef.current?.contains(event.target as Node)) setActionMenuOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    document.addEventListener('pointerdown', closeOnPointerDown)
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape)
+      document.removeEventListener('pointerdown', closeOnPointerDown)
+    }
+  }, [actionMenuOpen])
+
   return (
     <div className="min-h-screen w-full min-w-0 bg-[#02040f] text-white font-sans">
       {/* Header */}
@@ -1714,71 +2479,108 @@ export default function DashboardCMDB() {
           <div className="flex items-center">
             <img src={logoImg} alt="JoSYS" className="h-8 md:h-10 w-auto object-contain brightness-125" />
           </div>
-          <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 flex-col items-center">
+          <div className={`${actionMenuMounted ? 'hidden' : 'hidden lg:flex'} absolute left-1/2 -translate-x-1/2 flex-col items-center`}>
             <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Services Dashboard</span>
           </div>
-          <div className="flex w-full flex-wrap items-center justify-between gap-1 sm:w-auto sm:justify-end sm:gap-2">
-            {user?.id && <ThemeToggle userId={user.id} />}
-            <button
-              onClick={() => fetchData()}
-              className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
-              title="Refresh"
-            >
-              <RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />
-            </button>
-            {(hasPermission('alerts.configure') || hasPermission('roles.manage') || hasPermission('audit.view') || hasPermission('data.transfer') || hasPermission('records.create')) && (
-              <>
+          <div ref={actionMenuRef} className="relative flex w-full flex-wrap items-center justify-between gap-1 sm:w-auto sm:justify-end sm:gap-2 lg:flex-nowrap">
+            {user?.id && <div ref={themeControlRef} className="header-shifting-control flex h-10 items-center">
+              <ThemeToggle userId={user.id} />
+            </div>}
+            <div ref={refreshControlRef} className="header-shifting-control flex h-10 items-center">
+              <button
+                onClick={() => fetchData()}
+                className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition-all hover:bg-slate-800 hover:text-white"
+                title="Refresh"
+              >
+                <RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />
+              </button>
+            </div>
+            {actionMenuMounted && (
+              <div
+                id="dashboard-action-menu"
+                role="toolbar"
+                aria-label="Dashboard actions"
+                className={`action-toolbar absolute right-0 top-full z-50 mt-2 flex h-10 w-max max-w-[calc(100vw-2rem)] flex-nowrap items-center justify-end gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/95 p-0 shadow-xl backdrop-blur-md lg:static lg:mt-0 lg:max-w-none lg:overflow-visible ${
+                  actionMenuOpen ? 'action-toolbar-open' : 'action-toolbar-closing'
+                }`}
+              >
                 {hasPermission('alerts.configure') && <button
-                  onClick={openAlertSettings}
-                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-colors"
+                  type="button"
+                  onClick={() => { setActionMenuOpen(false); void openAlertSettings() }}
+                  className="action-toolbar-button"
                   title="Configure email alerts"
                 >
                   <Calendar size={14} />
                   <span className="hidden md:inline">Email alerts</span>
                 </button>}
                 {hasPermission('roles.manage') && <button
-                  onClick={fetchRoles}
-                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
+                  type="button"
+                  onClick={() => { setActionMenuOpen(false); void fetchRoles() }}
+                  className="action-toolbar-button"
                   title="Manage roles"
                 >
                   <Users size={14} />
                   <span className="hidden md:inline">{hasPermission('permissions.manage') ? 'Access' : 'Roles'}</span>
                 </button>}
                 {hasPermission('audit.view') && <button
-                  onClick={fetchAuditLogs}
-                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
+                  type="button"
+                  onClick={() => { setActionMenuOpen(false); void fetchAuditLogs() }}
+                  className="action-toolbar-button"
                   title="Review activity logs"
                 >
                   <ClipboardList size={14} />
                   <span className="hidden md:inline">Audit logs</span>
                 </button>}
                 {hasPermission('data.transfer') && <button
-                  onClick={() => setDataTransferModal(true)}
-                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
+                  type="button"
+                  onClick={() => { setActionMenuOpen(false); setDataTransferModal(true) }}
+                  className="action-toolbar-button"
                   title="Import or export CMDB data"
                 >
                   <ArrowUpDown size={14} />
                   <span className="hidden md:inline">Data</span>
                 </button>}
-                {hasPermission('records.create') && <button
-                  onClick={() => { setEditItem(null); setNewItemDefaults(null); setModalOpen(true) }}
-                  className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 p-2.5 sm:px-4 rounded-xl text-sm shadow-lg shadow-cyan-600/20 transition-all"
-                  title="New record"
+                <button
+                  type="button"
+                  onClick={() => { setActionMenuOpen(false); void signOut() }}
+                  title={user?.email ?? 'Sign out'}
+                  aria-label="Sign out"
+                  className="action-toolbar-button action-toolbar-button-danger"
                 >
-                  <Plus size={14} />
-                  <span className="hidden sm:inline">New record</span>
-                </button>}
-              </>
+                  <LogOut size={14} />
+                  <span className="hidden md:inline">Sign out</span>
+                </button>
+              </div>
             )}
+            {hasPermission('records.create') && <button
+              type="button"
+              onClick={() => {
+                setEditItem(null)
+                setNewItemDefaults(null)
+                setModalOpen(true)
+              }}
+              className="header-new-record flex h-10 w-10 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-0 text-sm text-white shadow-lg shadow-cyan-600/20 transition-all hover:-translate-y-px hover:bg-cyan-500 sm:w-[132px] sm:px-3"
+              title="New record"
+            >
+              <Plus size={14} />
+              <span className="hidden sm:inline">New record</span>
+            </button>}
             <button
               type="button"
-              onClick={() => signOut()}
-              title={user?.email ?? 'Sign out'}
-              aria-label="Sign out"
-              className="flex min-h-10 min-w-10 touch-manipulation items-center justify-center gap-2 bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 px-3 py-2.5 rounded-xl text-sm transition-all"
+              onClick={() => {
+                captureHeaderControlPositions()
+                setActionMenuOpen(current => !current)
+              }}
+              aria-expanded={actionMenuOpen}
+              aria-controls="dashboard-action-menu"
+              className={`flex h-10 w-10 items-center justify-center gap-2 rounded-xl border px-0 text-sm font-medium transition-all sm:w-[132px] sm:px-3 ${
+                actionMenuOpen
+                  ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
+                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-cyan-500/40 hover:bg-slate-700 hover:text-white'
+              }`}
             >
-              <LogOut size={14} />
-              <span className="hidden md:inline">Sign out</span>
+              {actionMenuOpen ? <X size={16} /> : <Menu size={16} />}
+              <span className="hidden sm:inline">{actionMenuOpen ? 'Close' : 'Actions'}</span>
             </button>
           </div>
         </div>
@@ -1849,11 +2651,11 @@ export default function DashboardCMDB() {
             <div className="grid grid-cols-2 gap-3">
               <button onClick={() => { setStatsModal('clients'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
                 <p className="text-xs text-slate-400">Clients</p>
-                <p className="mt-1 text-2xl font-bold">{globalStats.clients}</p>
+                <p className="stat-card-value mt-1 text-2xl font-bold">{globalStats.clients}</p>
               </button>
               <button onClick={() => { setStatsModal('total'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
                 <p className="text-xs text-slate-400">Total Items</p>
-                <p className="mt-1 text-2xl font-bold">{globalStats.total}</p>
+                <p className="stat-card-value mt-1 text-2xl font-bold">{globalStats.total}</p>
               </button>
               {hasPermission('quality.view') && <button
                 onClick={() => fetchQualityIssues(true)}
@@ -1864,7 +2666,7 @@ export default function DashboardCMDB() {
                 }`}
               >
                 <p className="text-xs text-slate-400">Data Quality Issues</p>
-                <p className={`mt-1 text-2xl font-bold ${visibleQualityIssues.length > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                <p className={`stat-card-value mt-1 text-2xl font-bold ${visibleQualityIssues.length > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
                   {visibleQualityIssues.length}
                 </p>
               </button>}
@@ -2129,19 +2931,19 @@ export default function DashboardCMDB() {
                 <div className="grid gap-3 md:grid-cols-4">
                   <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-700">
                     <p className="text-xs text-slate-400">Services</p>
-                    <p className="mt-2 text-2xl font-bold">{currentClient.summary.services}</p>
+                    <p className="stat-card-value mt-2 text-2xl font-bold">{currentClient.summary.services}</p>
                   </div>
                   <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-700">
                     <p className="text-xs text-slate-400">Licenses</p>
-                    <p className="mt-2 text-2xl font-bold">{currentClient.summary.licenses}</p>
+                    <p className="stat-card-value mt-2 text-2xl font-bold">{currentClient.summary.licenses}</p>
                   </div>
                   <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
                     <p className="text-xs text-amber-200">Expiring soon</p>
-                    <p className="mt-2 text-2xl font-bold text-amber-200">{currentClient.summary.expiring}</p>
+                    <p className="stat-card-value mt-2 text-2xl font-bold text-amber-200">{currentClient.summary.expiring}</p>
                   </div>
                   <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4">
                     <p className="text-xs text-rose-200">Critical</p>
-                    <p className="mt-2 text-2xl font-bold text-rose-200">{currentClient.summary.critical}</p>
+                    <p className="stat-card-value mt-2 text-2xl font-bold text-rose-200">{currentClient.summary.critical}</p>
                   </div>
                 </div>
 
@@ -2208,6 +3010,17 @@ export default function DashboardCMDB() {
                           clientName: currentClient.name,
                           category,
                         })}
+                        onBulkReplaceItems={category => setBulkItemScope({
+                          clientId: currentClient.id,
+                          clientName: currentClient.name,
+                          category,
+                        })}
+                        onBulkDeleteItems={(category, items) => setBulkDeleteScope({
+                          clientId: currentClient.id,
+                          clientName: currentClient.name,
+                          category,
+                          items,
+                        })}
                       />
                     ))}
                     {currentClient.sections.length === 0 && (
@@ -2265,6 +3078,26 @@ export default function DashboardCMDB() {
         <BulkCredentialReplaceModal
           {...bulkCredentialScope}
           onClose={() => setBulkCredentialScope(null)}
+          onCompleted={async () => {
+            await fetchData(false)
+          }}
+        />
+      )}
+
+      {bulkItemScope && (
+        <BulkItemReplaceModal
+          {...bulkItemScope}
+          onClose={() => setBulkItemScope(null)}
+          onCompleted={async () => {
+            await fetchData(false)
+          }}
+        />
+      )}
+
+      {bulkDeleteScope && (
+        <BulkDeleteItemsModal
+          {...bulkDeleteScope}
+          onClose={() => setBulkDeleteScope(null)}
           onCompleted={async () => {
             await fetchData(false)
           }}
@@ -2683,6 +3516,7 @@ export default function DashboardCMDB() {
                 <p className="py-12 text-center text-sm text-slate-500">No audit events match these filters.</p>
               ) : filteredAuditLogs.map(log => {
                 const isExpanded = expandedAuditLogId === log.id
+                const presentation = getAuditPresentation(log)
                 const eventColor = log.event_type === 'authentication'
                   ? 'bg-cyan-500/15 text-cyan-300'
                   : log.event_type === 'security'
@@ -2703,10 +3537,10 @@ export default function DashboardCMDB() {
                             {log.actor_email ?? 'system'}
                           </span>
                         </div>
-                        <p className="break-words text-sm text-white">{log.summary}</p>
-                        <p className="mt-1 break-words text-xs text-slate-500">
-                          {log.entity_name ?? log.entity_type ?? 'Session'} · {log.action}
-                        </p>
+                        <p className="break-words text-sm font-medium text-white">{presentation.title}</p>
+                        {presentation.context && (
+                          <p className="mt-1 break-words text-xs text-slate-500">{presentation.context}</p>
+                        )}
                       </div>
                       <div className="flex shrink-0 items-center justify-between gap-2 text-xs text-slate-500 sm:justify-end">
                         <span>{new Date(log.occurred_at).toLocaleString()}</span>

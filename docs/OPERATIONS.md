@@ -146,6 +146,23 @@ se genera un nuevo evento de aviso. La deduplicación se guarda en
 elimina la marca de deduplicación; la alerta se enviará nuevamente en la
 siguiente ejecución programada.
 
+### Mejora pendiente: contenido accionable del correo estancado
+
+Conservar como especificación para una iteración posterior que el correo incluya:
+
+- cliente y licencia;
+- fecha de vencimiento y días restantes;
+- proceso actual;
+- días que lleva detenido;
+- fecha del último seguimiento;
+- responsable asignado;
+- enlace directo al registro dentro del dashboard;
+- acción recomendada según el proceso actual.
+
+Los primeros cuatro datos ya forman parte del correo. Para completar la mejora
+se requiere añadir un responsable de renovación al modelo, definir una URL base
+del dashboard y acordar las acciones recomendadas para cada etapa del proceso.
+
 ### Variables secretas de la Edge Function
 
 Configura en **Supabase > Edge Functions > Secrets**:
