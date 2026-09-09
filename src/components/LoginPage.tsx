@@ -2,12 +2,12 @@ import { useState, useMemo, useCallback, memo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, LogIn, Monitor } from 'lucide-react'
 import logoImg from '../assets/logo1.png'
-import FloatingLines from './FloatingLines'
+import Topography from './Topography'
 import BorderGlow from './BorderGlow'
 import SpecularButton from './SpecularButton'
 
 // Memoizar componentes pesados para evitar re-renders cuando cambia el estado del formulario
-const MemoizedFloatingLines = memo(FloatingLines)
+const MemoizedTopography = memo(Topography)
 const MemoizedBorderGlow = memo(BorderGlow)
 
 export default function LoginPage() {
@@ -18,25 +18,36 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Memoizar props de FloatingLines para que no cambien de referencia en cada render
-  const floatingLinesProps = useMemo(() => ({
-    linesGradient: ['#0100f0', '#6f6fff', '#b6b6b6'],
-    enabledWaves: ['top', 'middle', 'bottom'] as Array<'top' | 'middle' | 'bottom'>,
-    lineCount: 8,
-    lineDistance: 8,
-    bendRadius: 8,
-    bendStrength: -2,
-    interactive: true,
-    parallax: true,
-    animationSpeed: 1,
-    mixBlendMode: 'screen' as const,
+  // Memoizar props de Topography para que no cambien de referencia en cada render
+  const topographyProps = useMemo(() => ({
+    lowColor: '#00fff6',
+    midColor: '#2836ff',
+    highColor: '#FFFFFF',
+    speed: 0.2,
+    morphAmount: 2.8,
+    morphSpeed: 0.05,
+    bands: 4,
+    thickness: 0.11,
+    scale: 1.4,
+    pixelSize: 20,
+    glow: 1.2,
+    colorMode: 'elevation' as const,
+    contrast: 3,
+    brightness: 1.3,
+    fillBands: false,
+    opacity: 1,
+    grain: true,
+    grainIntensity: 0.05,
+    mouseInteraction: true,
+    mouseRadius: 0.05,
+    mouseStrength: 0.2,
   }), [])
 
   // Memoizar props de BorderGlow
   const borderGlowProps = useMemo(() => ({
     edgeSensitivity: 30,
     glowColor: '220 80 80',
-    backgroundColor: 'rgba(5,13,24,0.75)',
+    backgroundColor: 'rgba(22,38,68,0.85)',
     borderRadius: 20,
     glowRadius: 40,
     glowIntensity: 1.2,
@@ -75,7 +86,7 @@ export default function LoginPage() {
 
         {/* Fondo - Memoizado para evitar recreacion del canvas WebGL en cada render */}
         <div className="absolute inset-0 z-0">
-          <MemoizedFloatingLines {...floatingLinesProps} />
+          <MemoizedTopography {...topographyProps} />
         </div>
 
         {/* Login - Memoizado para evitar parpadeo del glow */}
