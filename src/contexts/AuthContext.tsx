@@ -16,11 +16,15 @@ const ACTIVITY_EVENTS = [
 ] as const
 const ACTIVITY_LISTENER_OPTIONS: AddEventListenerOptions = { capture: true, passive: true }
 
+function staySignedInKey(email: string) {
+  return `cmdb-stay-signed-in:${email.trim().toLowerCase()}`
+}
+
 interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>
+  signIn: (email: string, password: string, staySignedIn?: boolean) => Promise<{ error: Error | null }>
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>
   signInWithMicrosoft: () => Promise<{ error: Error | null }>
   signOut: (reason?: 'manual' | 'inactivity') => Promise<void>
@@ -32,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [staySignedIn, setStaySignedIn] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTimerResetRef = useRef(0)
   const userRef = useRef<User | null>(null)
@@ -79,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Start/stop inactivity timer based on session
   useEffect(() => {
-    if (!user) {
+    if (!user || staySignedIn) {
       if (timerRef.current) clearTimeout(timerRef.current)
       return
     }
@@ -105,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [user, resetTimer, handleActivity])
+  }, [user, staySignedIn, resetTimer, handleActivity])
 
   useEffect(() => {
     const logSessionStart = async (activeSession: Session) => {
@@ -121,10 +126,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!error) sessionStorage.setItem(sessionMarker, 'true')
     }
 
+    const syncStaySignedIn = (activeUser: User | null) => {
+      const email = activeUser?.email
+      setStaySignedIn(email ? localStorage.getItem(staySignedInKey(email)) === 'true' : false)
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setUser(session?.user ?? null)
       userRef.current = session?.user ?? null
+      syncStaySignedIn(session?.user ?? null)
       if (session) void logSessionStart(session)
       setLoading(false)
     })
@@ -144,14 +155,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       userRef.current = newUser
       setSession(session)
       setUser(newUser)
+      syncStaySignedIn(newUser)
       if (event === 'SIGNED_IN' && session) void logSessionStart(session)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string, staySignedInPreference = false) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (!error) {
+      if (staySignedInPreference) {
+        localStorage.setItem(staySignedInKey(email), 'true')
+      } else {
+        localStorage.removeItem(staySignedInKey(email))
+      }
+      setStaySignedIn(staySignedInPreference)
+    }
     return { error }
   }
 

@@ -14,6 +14,7 @@ export default function LoginPage() {
   const { signIn, signInWithMicrosoft } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [staySignedIn, setStaySignedIn] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -49,12 +50,12 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
 
-    const { error } = await signIn(email, password)
+    const { error } = await signIn(email, password, staySignedIn)
 
     if (error) setError(error.message)
 
     setLoading(false)
-  }, [email, password, signIn])
+  }, [email, password, staySignedIn, signIn])
 
   const handleMicrosoft = useCallback(async () => {
     setError('')
@@ -138,6 +139,16 @@ export default function LoginPage() {
                   />
                 </div>
               </div>
+
+              <label className="flex items-center gap-2 text-sm text-white/80 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={staySignedIn}
+                  onChange={(e) => setStaySignedIn(e.target.checked)}
+                  className="w-4 h-4 rounded border-white/30 bg-white/10 text-blue-600 focus:ring-2 focus:ring-blue-500/40 cursor-pointer"
+                />
+                Stay signed in
+              </label>
 
               {/* BOTON INICIAR SESION REEMPLAZADO POR SPECULARBUTTON */}
               <div className="flex justify-center">
