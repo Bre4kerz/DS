@@ -1,17 +1,32 @@
 import { useState, useMemo, useCallback } from 'react'
-import { CmdbItem, getItemStatus, getDaysUntilExpiration } from '../lib/supabase'
+import { CmdbItem, getItemStatus, getDaysUntilExpiration, hasCredentials } from '../lib/supabase'
 import { ClientWithItems } from './useCmdbData'
 
-export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[]) {
+export type CmdbFiltersInitialState = {
+  selectedClientId?: string | null
+  openSections?: string[]
+  categoryFilter?: string
+  alertThreshold?: number
+  alertStatus?: string
+  alertsExpanded?: boolean
+}
+
+export function useCmdbFilters(
+  allItems: CmdbItem[],
+  clients: ClientWithItems[],
+  initial?: CmdbFiltersInitialState,
+) {
   const [search, setSearch] = useState('')
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState<string>('Todos')
-  const [alertThreshold, setAlertThreshold] = useState<number>(365)
-  const [alertStatus, setAlertStatus] = useState('Todos')
-  const [alertsExpanded, setAlertsExpanded] = useState(true)
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
+  const [categoryFilter, setCategoryFilter] = useState<string>(initial?.categoryFilter ?? 'All')
+  const [alertThreshold, setAlertThreshold] = useState<number>(initial?.alertThreshold ?? 365)
+  const [alertStatus, setAlertStatus] = useState(initial?.alertStatus ?? 'All')
+  const [alertsExpanded, setAlertsExpanded] = useState(initial?.alertsExpanded ?? true)
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(initial?.selectedClientId ?? null)
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null)
-  const [openSections, setOpenSections] = useState<Set<string>>(new Set())
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    () => new Set(initial?.openSections ?? []),
+  )
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -32,15 +47,21 @@ export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[])
       }))
   }, [search, allItems, clients])
 
+  const matchingClientResults = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return []
+    return clients.filter(client => client.name.toLowerCase().includes(q))
+  }, [search, clients])
+
   const allCategories = useMemo(() => {
     const cats = new Set(allItems.map(i => i.category).filter(Boolean))
-    return ['Todos', ...Array.from(cats).sort()]
+    return ['All', ...Array.from(cats).sort()]
   }, [allItems])
 
   const filteredClients = useMemo(() => {
     const q = search.trim().toLowerCase()
     return clients.filter(c => {
-      if (categoryFilter !== 'Todos') {
+      if (categoryFilter !== 'All') {
         const hasCategory = c.items.some(i => i.category === categoryFilter)
         if (!hasCategory) return false
       }
@@ -67,6 +88,7 @@ export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[])
     total: allItems.length,
     expiring: allItems.filter(i => getItemStatus(i.expiration_date) === 'Expiring').length,
     critical: allItems.filter(i => getItemStatus(i.expiration_date) === 'Expired').length,
+    withCredentials: allItems.filter(i => hasCredentials(i)).length,
   }), [clients, allItems])
 
   const expiringItems = useMemo(() => {
@@ -76,11 +98,10 @@ export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[])
         const days = getDaysUntilExpiration(i.expiration_date)
         const status = getItemStatus(i.expiration_date)
         if (days !== null && days > alertThreshold) return false
-        if (alertStatus === 'Todos') return true
+        if (alertStatus === 'All') return true
         return status === alertStatus
       })
       .sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
-      .slice(0, 12)
   }, [allItems, alertStatus, alertThreshold])
 
   const getStatsModalItems = useCallback((type: 'total' | 'expiring' | 'critical') => {
@@ -113,9 +134,10 @@ export function useCmdbFilters(allItems: CmdbItem[], clients: ClientWithItems[])
     alertStatus, setAlertStatus,
     alertsExpanded, setAlertsExpanded,
     selectedClientId, setSelectedClientId,
-    highlightedItemId,
+    highlightedItemId, setHighlightedItemId,
     openSections, setOpenSections,
     searchResults,
+    matchingClientResults,
     allCategories,
     filteredClients,
     currentClient,

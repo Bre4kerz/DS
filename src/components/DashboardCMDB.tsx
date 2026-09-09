@@ -1,127 +1,28 @@
-import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import logoImg from '../assets/logo1.png'
 import {
   ChevronDown, ChevronRight, Search, Plus, RefreshCw, X,
-  Server, HardDrive, Wifi, Printer, Shield, BadgeCheck, Globe, KeyRound,
-  AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
-  Eye, EyeOff, Copy, Lock, LogOut, History, Copy as CopyIcon, Users, ClipboardList,
-  ArrowUpDown, Send, Menu, Moon, Sun, MoreHorizontal, SlidersHorizontal
+  Server, AlertTriangle, CheckCircle, Calendar, Monitor, Pencil, Trash2,
+  LogOut, History, Users, ClipboardList, ArrowUpDown, Send, Menu,
 } from 'lucide-react'
 import {
   supabase, CmdbClient, CmdbItem, getItemStatus, getDaysUntilExpiration,
   ClientSummary, SectionData,
-  hasCredentials, revealCredentials, Credentials, bulkReplaceCredentials,
-  bulkReplaceItemField, bulkDeleteItems, type CredentialBulkField, type ItemBulkField
 } from '../lib/supabase'
 import ItemModal from './ItemModal'
 import { CMDB_PERMISSION_KEYS, useCmdbData, type CmdbPermission } from '../hooks/useCmdbData'
+import { useCmdbFilters } from '../hooks/useCmdbFilters'
+import { useCmdbModals } from '../hooks/useCmdbModals'
+import ThemeToggle from './dashboard/ThemeToggle'
+import StatusPill from './dashboard/StatusPill'
+import SectionCard from './dashboard/SectionCard'
+import BulkCredentialReplaceModal from './dashboard/BulkCredentialReplaceModal'
+import BulkItemReplaceModal from './dashboard/BulkItemReplaceModal'
+import BulkDeleteItemsModal from './dashboard/BulkDeleteItemsModal'
+import { getProcessTracking, isProcessStale } from './dashboard/processTracking'
 
 const DataTransferModal = lazy(() => import('./DataTransferModal'))
-
-const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  'Servers': <Server size={18} />,
-  'NAS/Storage': <HardDrive size={18} />,
-  'Remote Access': <Wifi size={18} />,
-  'OA Devices': <Printer size={18} />,
-  'Managed services': <Shield size={18} />,
-  'Licenses': <BadgeCheck size={18} />,
-  'Services': <Globe size={18} />,
-  'VPN': <KeyRound size={18} />,
-  'Firewall': <Shield size={18} />,
-  'Antivirus': <AlertTriangle size={18} />,
-  'Backup': <HardDrive size={18} />,
-}
-
-type CategoryStyle = {
-  border: string
-  icon: string
-  rgb: string
-  lightRgb: string
-}
-
-const DEFAULT_CATEGORY_STYLE: CategoryStyle = {
-  border: 'border-slate-700/60',
-  icon: 'bg-slate-800 text-slate-300',
-  rgb: '100 116 139',
-  lightRgb: '95 112 131',
-}
-
-const CATEGORY_STYLES: Record<string, CategoryStyle> = {
-  'Servers': {
-    border: 'border-cyan-500/30',
-    icon: 'bg-cyan-500/10 text-cyan-300',
-    rgb: '34 211 238',
-    lightRgb: '8 145 178',
-  },
-  'NAS/Storage': {
-    border: 'border-amber-500/30',
-    icon: 'bg-amber-500/10 text-amber-300',
-    rgb: '251 191 36',
-    lightRgb: '180 83 9',
-  },
-  'Remote Access': {
-    border: 'border-violet-500/30',
-    icon: 'bg-violet-500/10 text-violet-300',
-    rgb: '167 139 250',
-    lightRgb: '124 58 237',
-  },
-  'OA Devices': {
-    border: 'border-sky-500/30',
-    icon: 'bg-sky-500/10 text-sky-300',
-    rgb: '56 189 248',
-    lightRgb: '3 105 161',
-  },
-  'Managed services': {
-    border: 'border-emerald-500/30',
-    icon: 'bg-emerald-500/10 text-emerald-300',
-    rgb: '52 211 153',
-    lightRgb: '4 120 87',
-  },
-  'Licenses': {
-    border: 'border-rose-500/30',
-    icon: 'bg-rose-500/10 text-rose-300',
-    rgb: '251 113 133',
-    lightRgb: '190 18 60',
-  },
-  'Services': {
-    border: 'border-blue-500/30',
-    icon: 'bg-blue-500/10 text-blue-300',
-    rgb: '96 165 250',
-    lightRgb: '29 78 216',
-  },
-  'VPN': {
-    border: 'border-indigo-500/30',
-    icon: 'bg-indigo-500/10 text-indigo-300',
-    rgb: '129 140 248',
-    lightRgb: '79 70 229',
-  },
-  'Firewall': {
-    border: 'border-orange-500/30',
-    icon: 'bg-orange-500/10 text-orange-300',
-    rgb: '251 146 60',
-    lightRgb: '194 65 12',
-  },
-  'Antivirus': {
-    border: 'border-red-500/30',
-    icon: 'bg-red-500/10 text-red-300',
-    rgb: '248 113 113',
-    lightRgb: '185 28 28',
-  },
-  'Backup': {
-    border: 'border-teal-500/30',
-    icon: 'bg-teal-500/10 text-teal-300',
-    rgb: '45 212 191',
-    lightRgb: '15 118 110',
-  },
-  'Red': {
-    border: 'border-lime-500/30',
-    icon: 'bg-lime-500/10 text-lime-300',
-    rgb: '163 230 53',
-    lightRgb: '77 124 15',
-  },
-}
 
 type ClientWithItems = CmdbClient & {
   items: CmdbItem[]
@@ -138,7 +39,6 @@ type DashboardNavigationState = {
   alertsExpanded: boolean
 }
 
-type ThemeMode = 'dark' | 'light'
 type CmdbRole = 'superuser' | 'admin' | 'viewer'
 
 const PERMISSION_LABELS: Record<CmdbPermission, string> = {
@@ -169,39 +69,6 @@ const PERMISSION_TEMPLATES: Record<string, CmdbPermission[]> = {
 
 const getDashboardStateKey = (userId: string) => `cmdb-dashboard-state:${userId}`
 
-function ThemeToggle({ userId }: { userId: string }) {
-  const [theme, setTheme] = useState<ThemeMode>(() =>
-    localStorage.getItem(`cmdb-theme:${userId}`) === 'light' ? 'light' : 'dark',
-  )
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    localStorage.setItem(`cmdb-theme:${userId}`, theme)
-    return () => {
-      delete document.documentElement.dataset.theme
-    }
-  }, [theme, userId])
-
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={theme === 'light'}
-      aria-label={theme === 'dark' ? 'Activate light mode' : 'Activate dark mode'}
-      title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-      onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
-      className={`day-night-switch day-night-switch-${theme}`}
-    >
-      <span className="day-night-switch-icon day-night-switch-moon" aria-hidden="true">
-        <Moon size={17} strokeWidth={2.4} />
-      </span>
-      <span className="day-night-switch-icon day-night-switch-sun" aria-hidden="true">
-        <Sun size={17} strokeWidth={2.4} />
-      </span>
-      <span className="day-night-switch-thumb" aria-hidden="true" />
-    </button>
-  )
-}
-
 const readDashboardNavigationState = (userId?: string): DashboardNavigationState | null => {
   if (!userId) return null
   try {
@@ -221,74 +88,6 @@ const readDashboardNavigationState = (userId?: string): DashboardNavigationState
   } catch {
     return null
   }
-}
-
-function StatusPill({ status }: { status: string }) {
-  const label: Record<string, string> = {
-    'OK': 'OK',
-    'Expiring': 'Expiring',
-    'Expired': 'Expired',
-    'No date': 'No date',
-    'Not required': 'Not required',
-  }
-  const styles: Record<string, string> = {
-    'OK': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    'Expiring': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    'Expired': 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    'No date': 'bg-slate-700 text-slate-300 border-slate-600',
-    'Not required': 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-  }
-  return (
-    <span className={`inline-flex whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium ${styles[status] || styles['No date']}`}>
-      {label[status] || status}
-    </span>
-  )
-}
-
-function CredentialField({ label, value }: { label: string; value: string }) {
-  const [show, setShow] = useState(false)
-  const [copied, setCopied] = useState(false)
-
-  const copyValue = async () => {
-    if (!value) return
-    await navigator.clipboard.writeText(value)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <p className="mb-2 text-xs text-slate-400">{label}</p>
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-sm text-cyan-300 truncate">
-          {value ? (show ? value : '••••••••••••') : '—'}
-        </span>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button
-            onClick={() => setShow(!show)}
-            disabled={!value}
-            className="rounded-lg bg-slate-800 p-2 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            title={show ? 'Hide' : 'Show'}
-          >
-            {show ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
-          <button
-            onClick={copyValue}
-            disabled={!value}
-            className={`rounded-lg p-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-              copied
-                ? 'scale-110 bg-emerald-500/15 text-emerald-300'
-                : 'bg-slate-800 hover:bg-slate-700'
-            }`}
-            title={copied ? 'Copied' : 'Copy'}
-            aria-label={copied ? `${label} copied` : `Copy ${label}`}
-          >
-            {copied ? <CheckCircle size={14} /> : <Copy size={14} />}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 type QualityIssue = {
@@ -386,1299 +185,6 @@ type QualityRule = {
   severity: 'critical' | 'error' | 'warning'
 }
 
-function CopyableValue({ value, label = 'IP' }: { value: string; label?: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const copyIp = async (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    if (!value) return
-    await navigator.clipboard.writeText(value)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  if (!value) return <span className="text-slate-600">—</span>
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="font-mono text-cyan-400/80 text-[11px] truncate">{value}</span>
-      <button
-        type="button"
-        onClick={copyIp}
-        className={`rounded-md p-1 transition-colors ${
-          copied
-            ? 'bg-emerald-500/15 text-emerald-300'
-            : 'text-slate-600 hover:bg-slate-700 hover:text-cyan-300'
-        }`}
-        title={copied ? 'Copied' : `Copy ${label}`}
-        aria-label={copied ? `${label} copied` : `Copy ${label} ${value}`}
-      >
-        {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
-      </button>
-    </div>
-  )
-}
-
-function SensitiveCopyableValue({ value, label }: { value: string; label: string }) {
-  const [revealed, setRevealed] = useState(false)
-
-  if (!value) return <span className="text-slate-600">—</span>
-
-  return (
-    <div className="flex items-center gap-1.5">
-      {revealed ? (
-        <CopyableValue value={value} label={label} />
-      ) : (
-        <span className="font-mono text-[11px] tracking-wider text-slate-500">••••••••</span>
-      )}
-      <button
-        type="button"
-        onClick={event => {
-          event.stopPropagation()
-          setRevealed(current => !current)
-        }}
-        className="rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-700 hover:text-cyan-300"
-        title={revealed ? `Hide ${label}` : `Reveal ${label}`}
-        aria-label={revealed ? `Hide ${label}` : `Reveal ${label}`}
-      >
-        {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
-      </button>
-    </div>
-  )
-}
-
-function SecureCredentialsPanel({ itemId }: { itemId: string }) {
-  const [credentials, setCredentials] = useState<Credentials | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let active = true
-    revealCredentials(itemId)
-      .then(data => {
-        if (active) setCredentials(data)
-      })
-      .catch(fetchError => {
-        if (active) setError(fetchError instanceof Error ? fetchError.message : 'Could not reveal credentials')
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [itemId])
-
-  if (loading) return <p className="text-xs text-slate-500">Loading credentials…</p>
-  if (error) return <p className="text-xs text-rose-400">{error}</p>
-  if (!credentials) return null
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <CredentialField label="User" value={credentials.user} />
-      <CredentialField label="Password" value={credentials.password} />
-      <CredentialField label="User alt." value={credentials.user_alt} />
-      <CredentialField label="Password alt." value={credentials.password_alt} />
-    </div>
-  )
-}
-
-const BULK_CREDENTIAL_FIELDS: Array<{ value: CredentialBulkField; label: string }> = [
-  { value: 'password', label: 'Password' },
-  { value: 'alternative_password', label: 'Alternative password' },
-  { value: 'username', label: 'Username' },
-  { value: 'alternative_username', label: 'Alternative username' },
-]
-
-function BulkCredentialReplaceModal({ clientId, clientName, category, onClose, onCompleted }: {
-  clientId: string
-  clientName: string
-  category: string
-  onClose: () => void
-  onCompleted: () => void | Promise<void>
-}) {
-  const [field, setField] = useState<CredentialBulkField>('password')
-  const [oldValue, setOldValue] = useState('')
-  const [newValue, setNewValue] = useState('')
-  const [confirmation, setConfirmation] = useState('')
-  const [showValues, setShowValues] = useState(false)
-  const [previewCount, setPreviewCount] = useState<number | null>(null)
-  const [updatedCount, setUpdatedCount] = useState<number | null>(null)
-  const [working, setWorking] = useState(false)
-  const [error, setError] = useState('')
-  const isPasswordField = field === 'password' || field === 'alternative_password'
-  const valuesValid = oldValue.length > 0
-    && newValue.length > 0
-    && oldValue !== newValue
-    && newValue === confirmation
-
-  const resetPreview = () => {
-    setPreviewCount(null)
-    setUpdatedCount(null)
-    setError('')
-  }
-
-  const runReplacement = async (preview: boolean) => {
-    if (!valuesValid) return
-    setWorking(true)
-    setError('')
-    try {
-      const count = await bulkReplaceCredentials({
-        clientId,
-        category,
-        field,
-        oldValue,
-        newValue,
-        preview,
-      })
-      if (preview) {
-        setPreviewCount(count)
-      } else {
-        setUpdatedCount(count)
-        setOldValue('')
-        setNewValue('')
-        setConfirmation('')
-        setPreviewCount(null)
-        await onCompleted()
-      }
-    } catch (replacementError) {
-      setError(replacementError instanceof Error ? replacementError.message : 'Could not replace credentials')
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  const inputType = isPasswordField && !showValues ? 'password' : 'text'
-
-  return (
-    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!working) onClose() }}>
-      <div className="modal-surface w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5">
-          <div>
-            <div className="flex items-center gap-2 text-cyan-300">
-              <KeyRound size={20} />
-              <h3 className="text-lg font-semibold text-white">Bulk credential replacement</h3>
-            </div>
-            <p className="mt-1 text-xs text-slate-400">{clientName} · {category}</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={working} className="rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-white disabled:opacity-40" aria-label="Close bulk credential replacement">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-4 p-5">
-          {updatedCount !== null ? (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
-              <CheckCircle size={28} className="mx-auto text-emerald-300" />
-              <p className="mt-2 font-medium text-emerald-300">Replacement completed</p>
-              <p className="mt-1 text-sm text-slate-400">{updatedCount} record(s) updated.</p>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Credential field</label>
-                <select
-                  value={field}
-                  onChange={event => {
-                    setField(event.target.value as CredentialBulkField)
-                    setOldValue('')
-                    setNewValue('')
-                    setConfirmation('')
-                    resetPreview()
-                  }}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-cyan-500"
-                >
-                  {BULK_CREDENTIAL_FIELDS.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {[{
-                label: 'Current value (X)', value: oldValue, setter: setOldValue, autoComplete: 'current-password',
-              }, {
-                label: 'New value (Y)', value: newValue, setter: setNewValue, autoComplete: 'new-password',
-              }, {
-                label: 'Confirm new value', value: confirmation, setter: setConfirmation, autoComplete: 'new-password',
-              }].map(input => (
-                <div key={input.label}>
-                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">{input.label}</label>
-                  <input
-                    type={inputType}
-                    value={input.value}
-                    onChange={event => {
-                      input.setter(event.target.value)
-                      resetPreview()
-                    }}
-                    autoComplete={isPasswordField ? input.autoComplete : 'off'}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-cyan-500"
-                  />
-                </div>
-              ))}
-
-              {isPasswordField && (
-                <label className="flex items-center gap-2 text-xs text-slate-400">
-                  <input type="checkbox" checked={showValues} onChange={event => setShowValues(event.target.checked)} />
-                  Show values
-                </label>
-              )}
-
-              {confirmation && confirmation !== newValue && (
-                <p className="text-xs text-rose-400">The new values do not match.</p>
-              )}
-              {oldValue && newValue && oldValue === newValue && (
-                <p className="text-xs text-amber-300">The new value must be different.</p>
-              )}
-              {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">{error}</p>}
-              {previewCount !== null && (
-                <div className={`rounded-xl border p-3 text-sm ${
-                  previewCount > 0
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                    : 'border-slate-700 bg-slate-800/50 text-slate-400'
-                }`}>
-                  {previewCount > 0
-                    ? `${previewCount} exact match(es) found. Review the scope before replacing.`
-                    : 'No exact matches were found in this client and category.'}
-                </div>
-              )}
-
-              <p className="text-[11px] leading-relaxed text-slate-500">
-                Only exact matches in this client and category are affected. Stored passwords remain encrypted in Supabase Vault.
-              </p>
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-slate-800 p-4">
-          {updatedCount !== null ? (
-            <button type="button" onClick={onClose} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm hover:bg-cyan-500">Done</button>
-          ) : (
-            <>
-              <button type="button" onClick={onClose} disabled={working} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 disabled:opacity-40">Cancel</button>
-              <button type="button" onClick={() => void runReplacement(true)} disabled={!valuesValid || working} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300 disabled:opacity-40">
-                {working ? 'Checking…' : 'Check matches'}
-              </button>
-              <button type="button" onClick={() => void runReplacement(false)} disabled={!valuesValid || working || !previewCount} className="rounded-xl bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-500 disabled:opacity-40">
-                Replace {previewCount ?? 0} record(s)
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const BULK_ITEM_FIELDS: Array<{ value: ItemBulkField; label: string }> = [
-  { value: 'item_type', label: 'Type' },
-  { value: 'domain_version', label: 'Domain / Version' },
-  { value: 'role_use', label: 'Usage / Role' },
-  { value: 'vendor', label: 'Vendor' },
-  { value: 'branch', label: 'Branch' },
-  { value: 'ip', label: 'IP / ID' },
-  { value: 'serial', label: 'Serial / License' },
-  { value: 'email', label: 'Email' },
-  { value: 'process', label: 'Process' },
-]
-
-function BulkItemReplaceModal({ clientId, clientName, category, onClose, onCompleted }: {
-  clientId: string
-  clientName: string
-  category: string
-  onClose: () => void
-  onCompleted: () => void | Promise<void>
-}) {
-  const [field, setField] = useState<ItemBulkField>('item_type')
-  const [oldValue, setOldValue] = useState('')
-  const [newValue, setNewValue] = useState('')
-  const [confirmation, setConfirmation] = useState('')
-  const [clearConfirmed, setClearConfirmed] = useState(false)
-  const [previewCount, setPreviewCount] = useState<number | null>(null)
-  const [updatedCount, setUpdatedCount] = useState<number | null>(null)
-  const [working, setWorking] = useState(false)
-  const [error, setError] = useState('')
-  const isClearing = oldValue.length > 0 && newValue.length === 0
-  const valuesValid = oldValue !== newValue && (
-    isClearing ? clearConfirmed : newValue.trim().length > 0 && newValue === confirmation
-  )
-
-  const resetPreview = () => {
-    setPreviewCount(null)
-    setUpdatedCount(null)
-    setError('')
-  }
-
-  const runReplacement = async (preview: boolean) => {
-    if (!valuesValid) return
-    setWorking(true)
-    setError('')
-    try {
-      const count = await bulkReplaceItemField({
-        clientId,
-        category,
-        field,
-        oldValue,
-        newValue,
-        preview,
-      })
-      if (preview) {
-        setPreviewCount(count)
-      } else {
-        setUpdatedCount(count)
-        setOldValue('')
-        setNewValue('')
-        setConfirmation('')
-        setClearConfirmed(false)
-        setPreviewCount(null)
-        await onCompleted()
-      }
-    } catch (replacementError) {
-      setError(replacementError instanceof Error ? replacementError.message : 'Could not update the records')
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  return (
-    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!working) onClose() }}>
-      <div className="modal-surface w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5">
-          <div>
-            <div className="flex items-center gap-2 text-violet-300">
-              <ArrowUpDown size={20} />
-              <h3 className="text-lg font-semibold text-white">Bulk edit records</h3>
-            </div>
-            <p className="mt-1 text-xs text-slate-400">{clientName} · {category}</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={working} className="rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-white disabled:opacity-40" aria-label="Close bulk record editing">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-4 p-5">
-          {updatedCount !== null ? (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
-              <CheckCircle size={28} className="mx-auto text-emerald-300" />
-              <p className="mt-2 font-medium text-emerald-300">Bulk update completed</p>
-              <p className="mt-1 text-sm text-slate-400">{updatedCount} record(s) updated.</p>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Field to update</label>
-                <select
-                  value={field}
-                  onChange={event => {
-                    setField(event.target.value as ItemBulkField)
-                    setOldValue('')
-                    setNewValue('')
-                    setConfirmation('')
-                    setClearConfirmed(false)
-                    resetPreview()
-                  }}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
-                >
-                  {BULK_ITEM_FIELDS.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {[{
-                label: 'Current value', helper: 'Leave empty to match records with no value.', value: oldValue, setter: setOldValue,
-              }, {
-                label: 'New value', helper: '', value: newValue, setter: setNewValue,
-              }].map(input => (
-                <div key={input.label}>
-                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">{input.label}</label>
-                  <input
-                    type="text"
-                    value={input.value}
-                    onChange={event => {
-                      input.setter(event.target.value)
-                      setClearConfirmed(false)
-                      resetPreview()
-                    }}
-                    autoComplete="off"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
-                  />
-                  {input.helper && <p className="mt-1 text-[10px] text-slate-500">{input.helper}</p>}
-                </div>
-              ))}
-
-              {isClearing ? (
-                <label className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
-                  <input
-                    type="checkbox"
-                    checked={clearConfirmed}
-                    onChange={event => {
-                      setClearConfirmed(event.target.checked)
-                      resetPreview()
-                    }}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="block font-medium">Clear this field</span>
-                    <span className="mt-0.5 block text-[11px] opacity-75">Matching records will keep the field empty.</span>
-                  </span>
-                </label>
-              ) : (
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Confirm new value</label>
-                  <input
-                    type="text"
-                    value={confirmation}
-                    onChange={event => {
-                      setConfirmation(event.target.value)
-                      resetPreview()
-                    }}
-                    autoComplete="off"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-violet-500"
-                  />
-                </div>
-              )}
-
-              {!isClearing && confirmation && confirmation !== newValue && (
-                <p className="text-xs text-rose-400">The new values do not match.</p>
-              )}
-              {newValue && oldValue === newValue && (
-                <p className="text-xs text-amber-300">The new value must be different.</p>
-              )}
-              {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">{error}</p>}
-              {previewCount !== null && (
-                <div className={`rounded-xl border p-3 text-sm ${
-                  previewCount > 0
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                    : 'border-slate-700 bg-slate-800/50 text-slate-400'
-                }`}>
-                  {previewCount > 0
-                    ? `${previewCount} exact match(es) found. Review the scope before updating.`
-                    : 'No exact matches were found in this client and category.'}
-                </div>
-              )}
-
-              <p className="text-[11px] leading-relaxed text-slate-500">
-                Only exact matches in this client and category are affected. Every changed record is added to its history.
-              </p>
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-slate-800 p-4">
-          {updatedCount !== null ? (
-            <button type="button" onClick={onClose} className="rounded-xl bg-violet-600 px-4 py-2 text-sm hover:bg-violet-500">Done</button>
-          ) : (
-            <>
-              <button type="button" onClick={onClose} disabled={working} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 disabled:opacity-40">Cancel</button>
-              <button type="button" onClick={() => void runReplacement(true)} disabled={!valuesValid || working} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-300 disabled:opacity-40">
-                {working ? 'Checking…' : 'Check matches'}
-              </button>
-              <button type="button" onClick={() => void runReplacement(false)} disabled={!valuesValid || working || !previewCount} className="rounded-xl bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-500 disabled:opacity-40">
-                {isClearing ? 'Clear' : 'Update'} {previewCount ?? 0} record(s)
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function BulkDeleteItemsModal({ clientId, clientName, category, items, onClose, onCompleted }: {
-  clientId: string
-  clientName: string
-  category: string
-  items: CmdbItem[]
-  onClose: () => void
-  onCompleted: () => void | Promise<void>
-}) {
-  const [search, setSearch] = useState('')
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [confirmation, setConfirmation] = useState('')
-  const [working, setWorking] = useState(false)
-  const [deletedCount, setDeletedCount] = useState<number | null>(null)
-  const [error, setError] = useState('')
-  const filteredItems = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return items
-    return items.filter(item => [item.name, item.item_type, item.domain_version, item.ip, item.serial]
-      .some(value => value?.toLowerCase().includes(query)))
-  }, [items, search])
-  const expectedConfirmation = `DELETE ${selectedIds.size}`
-  const allVisibleSelected = filteredItems.length > 0 && filteredItems.every(item => selectedIds.has(item.id))
-
-  const toggleItem = (itemId: string) => {
-    setSelectedIds(previous => {
-      const next = new Set(previous)
-      if (next.has(itemId)) next.delete(itemId)
-      else next.add(itemId)
-      return next
-    })
-    setConfirmation('')
-    setError('')
-  }
-
-  const toggleVisible = () => {
-    setSelectedIds(previous => {
-      const next = new Set(previous)
-      if (allVisibleSelected) filteredItems.forEach(item => next.delete(item.id))
-      else filteredItems.forEach(item => next.add(item.id))
-      return next
-    })
-    setConfirmation('')
-    setError('')
-  }
-
-  const deleteSelected = async () => {
-    if (selectedIds.size === 0 || confirmation !== expectedConfirmation) return
-    setWorking(true)
-    setError('')
-    try {
-      const count = await bulkDeleteItems({
-        clientId,
-        category,
-        itemIds: Array.from(selectedIds),
-      })
-      setDeletedCount(count)
-      await onCompleted()
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Could not delete the selected records')
-    } finally {
-      setWorking(false)
-    }
-  }
-
-  return (
-    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!working) onClose() }}>
-      <div className="modal-surface flex max-h-[86vh] w-full max-w-xl flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5">
-          <div>
-            <div className="flex items-center gap-2 text-rose-300">
-              <Trash2 size={20} />
-              <h3 className="text-lg font-semibold text-white">Delete multiple records</h3>
-            </div>
-            <p className="mt-1 text-xs text-slate-400">{clientName} · {category}</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={working} className="rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-white disabled:opacity-40" aria-label="Close bulk deletion">
-            <X size={18} />
-          </button>
-        </div>
-
-        {deletedCount !== null ? (
-          <div className="p-5">
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-center">
-              <CheckCircle size={30} className="mx-auto text-emerald-300" />
-              <p className="mt-2 font-medium text-emerald-300">Deletion completed</p>
-              <p className="mt-1 text-sm text-slate-400">{deletedCount} record(s) deleted.</p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="border-b border-slate-800 p-4">
-              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3">
-                <Search size={14} className="text-slate-500" />
-                <input
-                  value={search}
-                  onChange={event => setSearch(event.target.value)}
-                  placeholder="Search records..."
-                  className="w-full bg-transparent py-2.5 text-sm outline-none placeholder:text-slate-600"
-                />
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <button
-                type="button"
-                onClick={toggleVisible}
-                disabled={filteredItems.length === 0}
-                className="mb-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-400 hover:bg-slate-800/60 disabled:opacity-40"
-              >
-                <input type="checkbox" checked={allVisibleSelected} readOnly className="pointer-events-none" />
-                <span>{allVisibleSelected ? 'Clear visible selection' : `Select all visible (${filteredItems.length})`}</span>
-              </button>
-
-              <div className="space-y-1.5">
-                {filteredItems.map(item => (
-                  <label key={item.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
-                    selectedIds.has(item.id)
-                      ? 'border-rose-500/35 bg-rose-500/10'
-                      : 'border-slate-800 bg-slate-950/40 hover:border-slate-700 hover:bg-slate-800/40'
-                  }`}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(item.id)}
-                      onChange={() => toggleItem(item.id)}
-                      className="mt-0.5"
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-white">{item.name || 'Unnamed record'}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-slate-500">
-                        {[item.item_type, item.domain_version || item.ip].filter(Boolean).join(' · ') || 'No additional details'}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-                {filteredItems.length === 0 && (
-                  <p className="py-8 text-center text-sm text-slate-500">No records match this search.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-3 border-t border-slate-800 p-4">
-              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                This permanently deletes {selectedIds.size} selected record(s), including their stored credentials and history.
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-400">
-                  Type <span className="font-mono text-rose-300">{expectedConfirmation}</span> to confirm
-                </label>
-                <input
-                  value={confirmation}
-                  onChange={event => setConfirmation(event.target.value)}
-                  disabled={selectedIds.size === 0}
-                  autoComplete="off"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm outline-none focus:border-rose-500 disabled:opacity-40"
-                />
-              </div>
-              {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">{error}</p>}
-            </div>
-          </>
-        )}
-
-        <div className="flex justify-end gap-2 border-t border-slate-800 p-4">
-          {deletedCount !== null ? (
-            <button type="button" onClick={onClose} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm hover:bg-cyan-500">Done</button>
-          ) : (
-            <>
-              <button type="button" onClick={onClose} disabled={working} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700 disabled:opacity-40">Cancel</button>
-              <button
-                type="button"
-                onClick={() => void deleteSelected()}
-                disabled={selectedIds.size === 0 || confirmation !== expectedConfirmation || working}
-                className="rounded-xl bg-rose-600 px-4 py-2 text-sm text-white hover:bg-rose-500 disabled:opacity-40"
-              >
-                {working ? 'Deleting…' : `Delete ${selectedIds.size} record(s)`}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type SectionColumnKey = 'type' | 'primaryDetail' | 'secondaryDetail' | 'identifier' | 'status' | 'process'
-
-const DEFAULT_SECTION_COLUMNS: Record<SectionColumnKey, boolean> = {
-  type: true,
-  primaryDetail: true,
-  secondaryDetail: true,
-  identifier: true,
-  status: true,
-  process: true,
-}
-
-function ColumnVisibilityMenu({ options, visible, onToggle }: {
-  options: Array<{ key: SectionColumnKey; label: string }>
-  visible: Record<SectionColumnKey, boolean>
-  onToggle: (key: SectionColumnKey) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState({ top: 0, left: 0 })
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const closeIfOutside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    const closeMenu = () => setOpen(false)
-    document.addEventListener('pointerdown', closeIfOutside)
-    document.addEventListener('keydown', closeOnEscape)
-    window.addEventListener('resize', closeMenu)
-    window.addEventListener('scroll', closeMenu, true)
-    return () => {
-      document.removeEventListener('pointerdown', closeIfOutside)
-      document.removeEventListener('keydown', closeOnEscape)
-      window.removeEventListener('resize', closeMenu)
-      window.removeEventListener('scroll', closeMenu, true)
-    }
-  }, [open])
-
-  const toggleMenu = () => {
-    if (open) {
-      setOpen(false)
-      return
-    }
-    const rect = buttonRef.current?.getBoundingClientRect()
-    if (rect) {
-      const estimatedHeight = options.length * 38 + 16
-      const opensUpward = window.innerHeight - rect.bottom < estimatedHeight + 16
-      setPosition({
-        top: opensUpward ? Math.max(8, rect.top - estimatedHeight - 8) : rect.bottom + 8,
-        left: Math.max(12, rect.right - 208),
-      })
-    }
-    setOpen(true)
-  }
-
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={toggleMenu}
-        className="flex items-center gap-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-1 text-[11px] text-slate-400 transition-colors hover:border-slate-600 hover:text-white"
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        <SlidersHorizontal size={12} />
-        Columns
-      </button>
-      {open && createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          aria-label="Visible columns"
-          className="section-actions-menu fixed z-[70] w-52 rounded-xl border p-1.5 shadow-2xl backdrop-blur-md"
-          style={{ top: position.top, left: position.left }}
-        >
-          {options.map(option => (
-            <label key={option.key} className="column-visibility-item flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-xs transition-colors">
-              <input
-                type="checkbox"
-                checked={visible[option.key]}
-                onChange={() => onToggle(option.key)}
-              />
-              <span>{option.label}</span>
-            </label>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </>
-  )
-}
-
-function SectionCard({ section, defaultOpen = false, canCreate = false, canEdit = false, canDelete = false, canViewCredentials = false, canEditCredentials = false, canViewHistory = false, highlightedItemId, onOpenChange, onAdd, onEdit, onDelete, onDuplicate, onHistory, onBulkReplaceCredentials, onBulkReplaceItems, onBulkDeleteItems }: {
-  section: SectionData
-  defaultOpen?: boolean
-  canCreate?: boolean
-  canEdit?: boolean
-  canDelete?: boolean
-  canViewCredentials?: boolean
-  canEditCredentials?: boolean
-  canViewHistory?: boolean
-  highlightedItemId?: string | null
-  onOpenChange: (category: string, open: boolean) => void
-  onAdd: (category: string) => void
-  onEdit: (item: CmdbItem) => void
-  onDelete: (id: string) => void
-  onDuplicate: (item: CmdbItem) => void
-  onHistory: (item: CmdbItem) => void
-  onBulkReplaceCredentials: (category: string) => void
-  onBulkReplaceItems: (category: string) => void
-  onBulkDeleteItems: (category: string, items: CmdbItem[]) => void
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
-  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'type-asc' | 'type-desc'>('name-asc')
-  const [credentialMenuOpen, setCredentialMenuOpen] = useState(false)
-  const [credentialMenuPosition, setCredentialMenuPosition] = useState({ top: 0, left: 0 })
-  const credentialMenuButtonRef = useRef<HTMLButtonElement>(null)
-  const credentialMenuRef = useRef<HTMLDivElement>(null)
-  const icon = CATEGORY_ICONS[section.title] || <Server size={18} />
-  const categoryStyle = CATEGORY_STYLES[section.title] || DEFAULT_CATEGORY_STYLE
-  const isLicenseSection = section.title === 'Licenses'
-  const [visibleColumns, setVisibleColumns] = useState<Record<SectionColumnKey, boolean>>(() => {
-    const categoryDefaults = { ...DEFAULT_SECTION_COLUMNS, status: isLicenseSection }
-    try {
-      const stored = localStorage.getItem(`cmdb-section-columns:v2:${section.title}`)
-      return stored ? { ...categoryDefaults, ...JSON.parse(stored) } : categoryDefaults
-    } catch {
-      return categoryDefaults
-    }
-  })
-  const hasExpiring = section.rows.some(r => r.status === 'Expiring' || r.status === 'Expired')
-  const hasCreds = canViewCredentials && section.rows.some(r => hasCredentials(r.item))
-  const columnOptions: Array<{ key: SectionColumnKey; label: string }> = [
-    { key: 'type', label: 'Type' },
-    { key: 'primaryDetail', label: isLicenseSection ? 'Vendor' : 'Domain / Version' },
-    { key: 'secondaryDetail', label: isLicenseSection ? 'Branch' : 'Usage / Roles' },
-    { key: 'identifier', label: isLicenseSection ? 'Serial / License' : 'IP / ID' },
-    { key: 'status', label: 'Status' },
-    ...(isLicenseSection ? [{ key: 'process' as const, label: 'Process' }] : []),
-  ]
-  const visibleColumnCount = 3 + columnOptions.filter(option => visibleColumns[option.key]).length
-
-  const sortedRows = [...section.rows].sort((a, b) => {
-    switch (sortBy) {
-      case 'name-asc':  return a.item.name.localeCompare(b.item.name)
-      case 'name-desc': return b.item.name.localeCompare(a.item.name)
-      case 'type-asc':  return (a.item.item_type ?? '').localeCompare(b.item.item_type ?? '')
-      case 'type-desc': return (b.item.item_type ?? '').localeCompare(a.item.item_type ?? '')
-      default: return 0
-    }
-  })
-
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const toggleSection = () => {
-    setOpen(current => {
-      const next = !current
-      onOpenChange(section.title, next)
-      return next
-    })
-  }
-
-  useEffect(() => {
-    if (highlightedItemId && section.rows.some(r => r.id === highlightedItemId)) {
-      setOpen(true)
-    }
-  }, [highlightedItemId, section.rows])
-
-  useEffect(() => {
-    setOpen(defaultOpen)
-  }, [defaultOpen])
-
-  useEffect(() => {
-    localStorage.setItem(`cmdb-section-columns:v2:${section.title}`, JSON.stringify(visibleColumns))
-  }, [section.title, visibleColumns])
-
-  useEffect(() => {
-    if (!credentialMenuOpen) return
-
-    const closeIfOutside = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!credentialMenuButtonRef.current?.contains(target) && !credentialMenuRef.current?.contains(target)) {
-        setCredentialMenuOpen(false)
-      }
-    }
-    const closeMenu = () => setCredentialMenuOpen(false)
-
-    document.addEventListener('pointerdown', closeIfOutside)
-    window.addEventListener('resize', closeMenu)
-    window.addEventListener('scroll', closeMenu, true)
-    return () => {
-      document.removeEventListener('pointerdown', closeIfOutside)
-      window.removeEventListener('resize', closeMenu)
-      window.removeEventListener('scroll', closeMenu, true)
-    }
-  }, [credentialMenuOpen])
-
-  const toggleCredentialMenu = () => {
-    if (credentialMenuOpen) {
-      setCredentialMenuOpen(false)
-      return
-    }
-    const rect = credentialMenuButtonRef.current?.getBoundingClientRect()
-    if (rect) {
-      const actionCount = Number(canEdit) + Number(canEdit && canEditCredentials && hasCreds) + Number(canDelete)
-      const estimatedMenuHeight = actionCount * 58 + 12
-      const opensUpward = window.innerHeight - rect.bottom < estimatedMenuHeight + 16
-      setCredentialMenuPosition({
-        top: opensUpward ? Math.max(8, rect.top - estimatedMenuHeight - 8) : rect.bottom + 8,
-        left: Math.max(12, rect.right - 208),
-      })
-    }
-    setCredentialMenuOpen(true)
-  }
-
-  return (
-    <div
-      className={`category-card overflow-hidden rounded-2xl border ${categoryStyle.border} ${
-      hasExpiring ? 'shadow-lg shadow-amber-500/5' : ''
-      } bg-[#0b0f24]`}
-      data-open={open}
-      style={{
-        '--category-dark-rgb': categoryStyle.rgb,
-        '--category-light-rgb': categoryStyle.lightRgb,
-      } as React.CSSProperties}
-    >
-
-      <div className="category-card-header flex w-full items-center justify-between gap-3 px-5 py-4">
-        <button onClick={toggleSection} className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
-        <div className="flex items-center gap-3.5">
-          <div className={`category-icon rounded-xl p-2.5 ${categoryStyle.icon}`}>
-            {icon}
-          </div>
-          <div className="text-left">
-            <h3 className="text-[15px] font-semibold text-white tracking-tight">{section.title}</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              {section.rows.length} records
-              {hasCreds && ` · ${section.rows.filter(r => hasCredentials(r.item)).length} with credentials`}
-            </p>
-          </div>
-        </div>
-        </button>
-
-        <div className="flex items-center gap-3">
-          {hasExpiring && (
-            <span className="hidden sm:flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-[11px] font-medium text-amber-300">
-              <AlertTriangle size={11} />
-              Check expirations
-            </span>
-          )}
-          {canCreate && (
-            <button
-              type="button"
-              onClick={() => onAdd(section.title)}
-              className="flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-500/20"
-              title={`Add record to ${section.title}`}
-            >
-              <Plus size={13} />
-              <span className="hidden sm:inline">Add</span>
-            </button>
-          )}
-          {(canEdit || canDelete) && (
-            <button
-              ref={credentialMenuButtonRef}
-              type="button"
-              onClick={toggleCredentialMenu}
-              className="rounded-lg border border-slate-700/60 p-1.5 text-slate-400 transition-colors hover:border-slate-600 hover:bg-slate-800/70 hover:text-white"
-              aria-label={`More actions for ${section.title}`}
-              aria-haspopup="menu"
-              aria-expanded={credentialMenuOpen}
-              title="More actions"
-            >
-              <MoreHorizontal size={16} />
-            </button>
-          )}
-          <button type="button" onClick={toggleSection} className="rounded-lg p-1 hover:bg-slate-700/50" aria-label={open ? `Collapse ${section.title}` : `Expand ${section.title}`}>
-            {open ? <ChevronDown size={18} className="text-slate-500" /> : <ChevronRight size={18} className="text-slate-500" />}
-          </button>
-        </div>
-      </div>
-
-      {open && (
-        <div className="border-t border-slate-800/60">
-
-          <div className="flex items-center justify-between px-5 py-2.5 bg-slate-950/30">
-            <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">
-              Detalle de records
-            </p>
-            <div className="flex items-center gap-2">
-              <ColumnVisibilityMenu
-                options={columnOptions}
-                visible={visibleColumns}
-                onToggle={key => setVisibleColumns(previous => ({ ...previous, [key]: !previous[key] }))}
-              />
-              <select
-                value={sortBy}
-                onChange={e => setSortBy(e.target.value as typeof sortBy)}
-                className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-2.5 py-1 text-[11px] text-slate-400 outline-none cursor-pointer hover:border-slate-600 transition-colors"
-              >
-                <option value="name-asc">Name A-Z</option>
-                <option value="name-desc">Name Z-A</option>
-                <option value="type-asc">Type A-Z</option>
-                <option value="type-desc">Type Z-A</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="border-b border-slate-800/60 text-[10px] uppercase tracking-wider text-slate-500">
-                  <th className="px-5 py-2.5 text-left font-medium w-10"></th>
-                  {visibleColumns.type && <th className="px-3 py-2.5 text-left font-medium">Type</th>}
-                  <th className="px-3 py-2.5 text-left font-medium">Name</th>
-                  {visibleColumns.primaryDetail && <th className="px-3 py-2.5 text-left font-medium hidden md:table-cell">{isLicenseSection ? 'Vendor' : 'Domain / Version'}</th>}
-                  {visibleColumns.secondaryDetail && <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">{isLicenseSection ? 'Branch' : 'Usage / Roles'}</th>}
-                  {visibleColumns.identifier && <th className="px-3 py-2.5 text-left font-medium hidden sm:table-cell">{isLicenseSection ? 'Serial / License' : 'IP / ID'}</th>}
-                  {visibleColumns.status && <th className="w-32 whitespace-nowrap px-3 py-2.5 text-left font-medium">Status</th>}
-                  {isLicenseSection && visibleColumns.process && <th className="px-3 py-2.5 text-left font-medium hidden lg:table-cell">Process</th>}
-                  <th className="px-5 py-2.5 text-right font-medium w-32">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedRows.map((row, idx) => {
-                  const isExpanded = expandedRows.has(row.id)
-                  const creds = canViewCredentials && hasCredentials(row.item)
-                  const isHighlighted = highlightedItemId === row.id
-                  const processTracking = isLicenseSection ? getProcessTracking(row.item) : null
-
-                  return (
-                    <Fragment key={row.id}>
-                      <tr
-                        id={'item-' + row.id}
-                        onClick={() => {
-                          if (creds) toggleRow(row.id)
-                        }}
-                        onKeyDown={event => {
-                          if (creds && (event.key === 'Enter' || event.key === ' ')) {
-                            event.preventDefault()
-                            toggleRow(row.id)
-                          }
-                        }}
-                        tabIndex={creds ? 0 : undefined}
-                        className={`border-b border-slate-800/40 transition-[background-color,border-color,box-shadow] duration-200 ${
-                          isHighlighted
-                            ? 'bg-cyan-500/15 border-l-2 border-l-cyan-400/60 glow-row'
-                            : idx % 2 === 0 ? 'bg-transparent' : 'bg-slate-900/20'
-                        } hover:bg-slate-800/30 ${creds ? 'cursor-pointer focus:outline-none focus:ring-1 focus:ring-inset focus:ring-cyan-500/40' : ''}`}
-                      >
-                        <td className="px-5 py-3">
-                          {creds ? (
-                            <button
-                              onClick={event => {
-                                event.stopPropagation()
-                                toggleRow(row.id)
-                              }}
-                              className="p-1 rounded-md hover:bg-slate-700/50 transition-colors"
-                            >
-                              {isExpanded 
-                                ? <ChevronDown size={14} className="text-cyan-400" />
-                                : <ChevronRight size={14} className="text-cyan-400" />
-                              }
-                            </button>
-                          ) : (
-                            <span className="inline-block w-[22px]"></span>
-                          )}
-                        </td>
-
-                        {visibleColumns.type && <td className="px-3 py-3">
-                          <span className="text-slate-400 text-[12px]">{row.type || '—'}</span>
-                        </td>}
-
-                        <td className="px-3 py-3">
-                          <div>
-                            <p className="text-white font-medium text-[13px]">{row.name || '—'}</p>
-                            {row.item.notes && (
-                              <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[200px]">{row.item.notes}</p>
-                            )}
-                            {isLicenseSection && (
-                              <>
-                                <p className="text-[10px] text-cyan-500/70 mt-0.5 truncate max-w-[220px]">
-                                  QTY: {row.item.qty ?? 1}
-                                </p>
-                                {row.item.process && (
-                                  <p className={`mt-1 max-w-[240px] truncate text-[10px] lg:hidden ${
-                                    processTracking?.stalled ? 'text-orange-300' : 'text-violet-300'
-                                  }`}>
-                                    {row.item.process}
-                                    {processTracking?.ageDays !== null && processTracking?.ageDays !== undefined
-                                      ? ` · ${processTracking.ageDays}d`
-                                      : ''}
-                                  </p>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-
-                        {visibleColumns.primaryDetail && <td className="px-3 py-3 hidden md:table-cell">
-                          <span className="text-slate-400 text-[12px]">{isLicenseSection ? row.item.vendor || '—' : row.domain || '—'}</span>
-                        </td>}
-
-                        {visibleColumns.secondaryDetail && <td className="px-3 py-3 hidden lg:table-cell">
-                          <span className="text-slate-500 text-[11px]">{isLicenseSection ? row.item.branch || '—' : row.role || '—'}</span>
-                        </td>}
-
-                        {visibleColumns.identifier && <td className="px-3 py-3 hidden sm:table-cell">
-                          {isLicenseSection ? (
-                            <SensitiveCopyableValue value={row.item.serial ?? ''} label="serial or license" />
-                          ) : (
-                            <CopyableValue value={row.ip} label="IP" />
-                          )}
-                        </td>}
-
-                        {visibleColumns.status && <td className="px-3 py-3">
-                          <StatusPill status={row.status} />
-                        </td>}
-
-                        {isLicenseSection && visibleColumns.process && (
-                          <td className="hidden max-w-[220px] px-3 py-3 lg:table-cell">
-                            {row.item.process ? (
-                              <div title={row.item.process}>
-                                <p className="truncate text-[11px] font-medium text-violet-300">{row.item.process}</p>
-                                <span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] ${
-                                  processTracking?.stalled
-                                    ? 'border-orange-500/30 bg-orange-500/10 text-orange-300'
-                                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
-                                }`}>
-                                  {processTracking?.ageDays === null
-                                    ? 'Tracking not started'
-                                    : processTracking?.stalled
-                                      ? `Stalled · ${processTracking?.ageDays}d`
-                                      : `${processTracking?.ageDays ?? 0}d in stage · limit ${processTracking?.limitDays ?? 5}d`}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-slate-600">—</span>
-                            )}
-                          </td>
-                        )}
-
-                        <td className="px-5 py-3">
-                          <div
-                            className="flex items-center justify-end gap-1"
-                            onClick={event => event.stopPropagation()}
-                          >
-                            {canViewHistory && (
-                              <button
-                                onClick={() => onHistory(row.item)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700/60 transition-all"
-                                title="History"
-                              >
-                                <History size={13} />
-                              </button>
-                            )}
-                            {canEdit && (
-                              <>
-                                <button
-                                  onClick={() => onDuplicate(row.item)}
-                                  className="p-1.5 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all"
-                                  title="Duplicate"
-                                >
-                                  <CopyIcon size={13} />
-                                </button>
-                                <button
-                                  onClick={() => onEdit(row.item)}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-blue-500/20 transition-all"
-                                  title="Edit"
-                                >
-                                  <Pencil size={13} />
-                                </button>
-                                {canDelete && (
-                                  <button
-                                    onClick={() => onDelete(row.id)}
-                                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                                    title="Delete"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-
-                      {isExpanded && creds && (
-                        <tr>
-                          <td colSpan={visibleColumnCount} className="px-0 py-0">
-                            <div className="bg-slate-950/40 border-t border-slate-800/30 px-5 py-4">
-                              <div className="flex items-center gap-2 mb-3">
-                                <Lock size={13} className="text-yellow-400/80" />
-                                <h4 className="text-[11px] font-semibold text-yellow-300/90 uppercase tracking-wider">Credentials</h4>
-                              </div>
-                              <SecureCredentialsPanel itemId={row.item.id} />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {sortedRows.length === 0 && (
-            <div className="text-center py-8 text-slate-500 text-sm">
-              <Server size={24} className="mx-auto mb-2 opacity-30" />
-              No hay records en esta sección
-            </div>
-          )}
-        </div>
-      )}
-
-      {credentialMenuOpen && createPortal(
-        <div
-          ref={credentialMenuRef}
-          role="menu"
-          aria-label={`Actions for ${section.title}`}
-          className="section-actions-menu fixed z-[70] w-52 rounded-xl border p-1.5 shadow-2xl backdrop-blur-md"
-          style={{ top: credentialMenuPosition.top, left: credentialMenuPosition.left }}
-        >
-          {canEdit && (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setCredentialMenuOpen(false)
-              onBulkReplaceItems(section.title)
-            }}
-            className="section-actions-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-colors"
-          >
-            <ArrowUpDown size={14} />
-            <span>
-              <span className="block">Bulk edit records</span>
-              <span className="mt-0.5 block text-[10px] font-normal opacity-60">Replace matching field values</span>
-            </span>
-          </button>
-          )}
-          {canEdit && canEditCredentials && hasCreds && (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setCredentialMenuOpen(false)
-              onBulkReplaceCredentials(section.title)
-            }}
-            className="section-actions-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-colors"
-          >
-            <KeyRound size={14} />
-            <span>
-              <span className="block">Replace credentials</span>
-              <span className="mt-0.5 block text-[10px] font-normal opacity-60">Update matching values in bulk</span>
-            </span>
-          </button>
-          )}
-          {canDelete && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setCredentialMenuOpen(false)
-                onBulkDeleteItems(section.title, section.rows.map(row => row.item))
-              }}
-              className="section-actions-menu-item section-actions-menu-item-danger flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-medium transition-colors"
-            >
-              <Trash2 size={14} />
-              <span>
-                <span className="block">Delete multiple records</span>
-                <span className="mt-0.5 block text-[10px] font-normal opacity-60">Select records to remove</span>
-              </span>
-            </button>
-          )}
-        </div>,
-        document.body,
-      )}
-    </div>
-  )
-}
-
-function getProcessTracking(item: CmdbItem): { ageDays: number | null; limitDays: number; stalled: boolean } | null {
-  if (!item.process?.trim()) return null
-  const limitDays = Math.min(365, Math.max(1, item.process_stale_days ?? 5))
-  if (!item.process_updated_at) return { ageDays: null, limitDays, stalled: false }
-  const updated = new Date(item.process_updated_at)
-  if (Number.isNaN(updated.getTime())) return { ageDays: null, limitDays, stalled: false }
-  const ageDays = Math.max(0, Math.floor((Date.now() - updated.getTime()) / (1000 * 60 * 60 * 24)))
-  return { ageDays, limitDays, stalled: ageDays >= limitDays }
-}
-
-function isProcessStale(item: CmdbItem): boolean {
-  const status = getItemStatus(item.expiration_date)
-  if (status === 'OK' || status === 'No date') return false
-  return getProcessTracking(item)?.stalled === true
-}
-
 export default function DashboardCMDB() {
   const { user, signOut } = useAuth()
   const restoredNavigation = useMemo(
@@ -1704,7 +210,45 @@ export default function DashboardCMDB() {
     saveRole: upsertRole,
     deleteRole: removeRole,
   } = useCmdbData(user)
-  const [search, setSearch] = useState('')
+  const {
+    search, setSearch,
+    showSearchDropdown, setShowSearchDropdown,
+    categoryFilter, setCategoryFilter,
+    alertThreshold, setAlertThreshold,
+    alertStatus, setAlertStatus,
+    alertsExpanded, setAlertsExpanded,
+    selectedClientId, setSelectedClientId,
+    highlightedItemId, setHighlightedItemId,
+    openSections, setOpenSections,
+    searchResults,
+    matchingClientResults,
+    allCategories,
+    filteredClients,
+    currentClient,
+    globalStats,
+    expiringItems,
+    navigateToItem,
+  } = useCmdbFilters(allItems, clients, restoredNavigation ?? undefined)
+  const {
+    modalOpen,
+    editItem,
+    newItemDefaults,
+    deleteConfirm, setDeleteConfirm,
+    editClientId,
+    editClientName, setEditClientName,
+    savingClient, setSavingClient,
+    historyItem, setHistoryItem,
+    statsModal,
+    modalSearch, setModalSearch,
+    rolesModal, setRolesModal,
+    openEditModal,
+    closeEditModal,
+    openNewItem,
+    handleEditClient: openEditClientModal,
+    closeEditClient,
+    openStatsModal,
+    closeStatsModal,
+  } = useCmdbModals()
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [actionMenuMounted, setActionMenuMounted] = useState(false)
   const actionMenuRef = useRef<HTMLDivElement>(null)
@@ -1721,22 +265,6 @@ export default function DashboardCMDB() {
         return { element, left: rect.left, top: rect.top }
       })
   }, [])
-  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
-  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null)
-  const [openSections, setOpenSections] = useState<Set<string>>(
-    () => new Set(restoredNavigation?.openSections ?? []),
-  )
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(
-    restoredNavigation?.selectedClientId ?? null,
-  )
-  const [statsModal, setStatsModal] = useState<null | 'clients' | 'total' | 'expiring' | 'critical' | 'alerts'>(null)
-  const [modalSearch, setModalSearch] = useState('')
-  const [alertThreshold, setAlertThreshold] = useState<number>(restoredNavigation?.alertThreshold ?? 365)
-  const [alertsExpanded, setAlertsExpanded] = useState(restoredNavigation?.alertsExpanded ?? true)
-  const [alertStatus, setAlertStatus] = useState(restoredNavigation?.alertStatus ?? 'All')
-  const [categoryFilter, setCategoryFilter] = useState<string>(restoredNavigation?.categoryFilter ?? 'All')
-  const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
-  const [rolesModal, setRolesModal] = useState(false)
   const [dataTransferModal, setDataTransferModal] = useState(false)
   const [bulkCredentialScope, setBulkCredentialScope] = useState<{
     clientId: string
@@ -1793,19 +321,12 @@ export default function DashboardCMDB() {
     | { type: 'delete'; email: string }
     | null
   >(null)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editItem, setEditItem] = useState<CmdbItem | null>(null)
-  const [newItemDefaults, setNewItemDefaults] = useState<{ clientId: string; category: string } | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-  const [editClientId, setEditClientId] = useState<string | null>(null)
-  const [editClientName, setEditClientName] = useState('')
-  const [savingClient, setSavingClient] = useState(false)
 
   useEffect(() => {
     if (clients.length > 0 && (!selectedClientId || !clients.some(client => client.id === selectedClientId))) {
       setSelectedClientId(clients[0].id)
     }
-  }, [clients, selectedClientId])
+  }, [clients, selectedClientId, setSelectedClientId])
 
   useEffect(() => {
     if (!user?.id) return
@@ -1827,73 +348,6 @@ export default function DashboardCMDB() {
     alertStatus,
     alertsExpanded,
   ])
-
-  const searchResults = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q || q.length < 2) return []
-    const matchingItems = allItems.filter(i =>
-      i.name?.toLowerCase().includes(q) ||
-      i.ip?.toLowerCase().includes(q) ||
-      i.serial?.toLowerCase().includes(q) ||
-      i.domain_version?.toLowerCase().includes(q) ||
-      i.vendor?.toLowerCase().includes(q) ||
-      i.branch?.toLowerCase().includes(q)
-    )
-    const results: Array<{ item: CmdbItem; client: CmdbClient | undefined }> = []
-    for (const i of matchingItems) {
-      results.push({ item: i, client: clients.find(c => c.id === i.client_id) })
-    }
-    return results.slice(0, 10)
-  }, [search, allItems, clients])
-
-  const matchingClientResults = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return []
-    return clients.filter(client => client.name.toLowerCase().includes(q))
-  }, [search, clients])
-
-  const allCategories = useMemo(() => {
-    const cats = new Set(allItems.map(i => i.category).filter(Boolean))
-    return ['All', ...Array.from(cats).sort()]
-  }, [allItems])
-
-  const filteredClients = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return clients.filter(c => {
-      if (categoryFilter !== 'All') {
-        const hasCategory = c.items.some(i => i.category === categoryFilter)
-        if (!hasCategory) return false
-      }
-      if (!q) return true
-      return (
-        c.name.toLowerCase().includes(q) ||
-        c.items.some(i =>
-          i.name.toLowerCase().includes(q) ||
-          i.ip?.toLowerCase().includes(q) ||
-          i.email?.toLowerCase().includes(q) ||
-          i.vendor?.toLowerCase().includes(q) ||
-          i.branch?.toLowerCase().includes(q)
-        )
-      )
-    })
-  }, [clients, search, categoryFilter])
-
-  const navigateToItem = (item: CmdbItem) => {
-    setSearch('')
-    setShowSearchDropdown(false)
-    setSelectedClientId(item.client_id ?? null)
-    // Open the section and highlight the item after navigation
-    setOpenSections(prev => new Set([...prev, item.category]))
-    setHighlightedItemId(item.id)
-    setTimeout(() => {
-      setHighlightedItemId(null)
-    }, 3000)
-    // Scroll to item after short delay
-    setTimeout(() => {
-      const el = document.getElementById('item-' + item.id)
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 300)
-  }
 
   const duplicateItem = async (item: CmdbItem) => {
     const rest: Partial<CmdbItem> = { ...item }
@@ -2263,10 +717,6 @@ export default function DashboardCMDB() {
     }
   }
 
-  const currentClient = useMemo(() => {
-    return clients.find(c => c.id === selectedClientId) || null
-  }, [clients, selectedClientId])
-
   const allClientSectionsOpen = Boolean(
     currentClient?.sections.length &&
     currentClient.sections.every(section => openSections.has(section.title)),
@@ -2322,28 +772,6 @@ export default function DashboardCMDB() {
     })
   }, [visibleQualityIssues, qualitySearch, qualitySeverity, allItems, clients])
 
-  const globalStats = useMemo(() => ({
-    clients: clients.length,
-    total: allItems.length,
-    expiring: allItems.filter(i => getItemStatus(i.expiration_date) === 'Expiring').length,
-    critical: allItems.filter(i => getItemStatus(i.expiration_date) === 'Expired').length,
-    withCredentials: allItems.filter(i => hasCredentials(i)).length,
-  }), [clients, allItems])
-
-  const expiringItems = useMemo(() => {
-    return allItems
-      .filter(i => {
-        if (!i.expiration_date) return false
-        const days = getDaysUntilExpiration(i.expiration_date)
-        const status = getItemStatus(i.expiration_date)
-        if (days !== null && days > alertThreshold) return false
-        if (alertStatus === 'All') return true
-        return status === alertStatus
-      })
-      .sort((a, b) => (a.expiration_date ?? '9999').localeCompare(b.expiration_date ?? '9999'))
-  }, [allItems, alertStatus, alertThreshold])
-
-
   const statsModalItems = useMemo(() => {
     switch (statsModal) {
       case 'total': return [...allItems].sort((a, b) => a.name.localeCompare(b.name))
@@ -2360,8 +788,7 @@ export default function DashboardCMDB() {
   }
 
   const handleEditClient = (client: ClientWithItems) => {
-    setEditClientId(client.id)
-    setEditClientName(client.name)
+    openEditClientModal(client.id, client.name)
   }
 
   const handleSaveClientName = async () => {
@@ -2369,8 +796,7 @@ export default function DashboardCMDB() {
     setSavingClient(true)
     await updateClient(editClientId, editClientName.trim())
     setSavingClient(false)
-    setEditClientId(null)
-    setEditClientName('')
+    closeEditClient()
   }
 
   const handleDeleteClient = async (clientId: string) => {
@@ -2392,15 +818,11 @@ export default function DashboardCMDB() {
   }
 
   const closeItemModal = () => {
-    setModalOpen(false)
-    setEditItem(null)
-    setNewItemDefaults(null)
+    closeEditModal()
   }
 
   const handleItemSaved = async (savedItem: { id: string; client_id: string; category: string }) => {
-    setModalOpen(false)
-    setEditItem(null)
-    setNewItemDefaults(null)
+    closeEditModal()
     await fetchData(false)
     highlightSavedItem(savedItem)
   }
@@ -2554,11 +976,7 @@ export default function DashboardCMDB() {
             )}
             {hasPermission('records.create') && <button
               type="button"
-              onClick={() => {
-                setEditItem(null)
-                setNewItemDefaults(null)
-                setModalOpen(true)
-              }}
+              onClick={() => openNewItem()}
               className="header-new-record flex h-10 w-10 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-0 text-sm text-white shadow-lg shadow-cyan-600/20 transition-all hover:-translate-y-px hover:bg-cyan-500 sm:w-[132px] sm:px-3"
               title="New record"
             >
@@ -2649,11 +1067,11 @@ export default function DashboardCMDB() {
 
             {/* Stats */}
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => { setStatsModal('clients'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
+              <button onClick={() => openStatsModal('clients')} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
                 <p className="text-xs text-slate-400">Clients</p>
                 <p className="stat-card-value mt-1 text-2xl font-bold">{globalStats.clients}</p>
               </button>
-              <button onClick={() => { setStatsModal('total'); setModalSearch('') }} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
+              <button onClick={() => openStatsModal('total')} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-600 hover:bg-slate-800 transition-all">
                 <p className="text-xs text-slate-400">Total Items</p>
                 <p className="stat-card-value mt-1 text-2xl font-bold">{globalStats.total}</p>
               </button>
@@ -2894,7 +1312,7 @@ export default function DashboardCMDB() {
         {/* ===== "VER MÁS" si hay más de 5 ===== */}
         {expiringItems.length > 5 && (
           <button
-            onClick={() => { setStatsModal('alerts'); setModalSearch('') }}
+            onClick={() => openStatsModal('alerts')}
             className="w-full flex items-center justify-center gap-2 py-3 text-sm text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/[0.04] transition-all border-t border-amber-500/10"
           >
             View all {expiringItems.length} alerts
@@ -2991,16 +1409,10 @@ export default function DashboardCMDB() {
                         canViewCredentials={hasPermission('credentials.view')}
                         canEditCredentials={hasPermission('credentials.edit')}
                         canViewHistory={hasPermission('history.view')}
-                        onAdd={category => {
-                          setEditItem(null)
-                          setNewItemDefaults({ clientId: currentClient.id, category })
-                          setModalOpen(true)
-                        }}
+                        onAdd={category => openNewItem({ clientId: currentClient.id, category })}
                         onEdit={item => {
                           setOpenSections(previous => new Set([...previous, item.category]))
-                          setNewItemDefaults(null)
-                          setEditItem(item)
-                          setModalOpen(true)
+                          openEditModal(item)
                         }}
                         onDelete={id => setDeleteConfirm(id)}
                         onDuplicate={duplicateItem}
@@ -3028,11 +1440,7 @@ export default function DashboardCMDB() {
                         <Server size={32} className="mx-auto mb-3 opacity-30" />
                         <p>Este cliente no tiene records</p>
                         <button
-                          onClick={() => {
-                            setEditItem(null)
-                            setNewItemDefaults({ clientId: currentClient.id, category: '' })
-                            setModalOpen(true)
-                          }}
+                          onClick={() => openNewItem({ clientId: currentClient.id, category: '' })}
                           className="mt-3 inline-flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm"
                         >
                           <Plus size={14} /> Add first record
@@ -3140,7 +1548,7 @@ export default function DashboardCMDB() {
 
       {/* Edit Client Name Modal */}
       {editClientId && (
-        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => { setEditClientId(null); setEditClientName('') }}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => closeEditClient()}>
           <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3 text-cyan-400">
               <Pencil size={24} />
@@ -3160,7 +1568,7 @@ export default function DashboardCMDB() {
             </div>
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => { setEditClientId(null); setEditClientName('') }}
+                onClick={() => closeEditClient()}
                 className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition-all"
               >
                 Cancel
@@ -3769,7 +2177,7 @@ export default function DashboardCMDB() {
       )}
       {/* Stats Detail Modal */}
       {statsModal && (
-        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => { setStatsModal(null); setModalSearch('') }}>
+        <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => closeStatsModal()}>
           <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-slate-800 flex-shrink-0">
               <h3 className="font-semibold text-lg">
@@ -3779,7 +2187,7 @@ export default function DashboardCMDB() {
                 {statsModal === 'critical' && `Critical / Expireds (${globalStats.critical})`}
                 {statsModal === 'alerts' && `Expiration alerts (${expiringItems.length})`}
               </h3>
-              <button onClick={() => { setStatsModal(null); setModalSearch('') }} className="text-slate-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800">
+              <button onClick={() => closeStatsModal()} className="text-slate-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800">
                 <X size={18} />
               </button>
             </div>
@@ -3810,7 +2218,7 @@ export default function DashboardCMDB() {
                   const expiring = cItems.filter(i => getItemStatus(i.expiration_date) === 'Expiring').length
                   const critical = cItems.filter(i => getItemStatus(i.expiration_date) === 'Expired').length
                   return (
-                    <button key={c.id} onClick={() => { setSelectedClientId(c.id); setStatsModal(null); setModalSearch('') }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
+                    <button key={c.id} onClick={() => { setSelectedClientId(c.id); closeStatsModal() }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
                       <div>
                         <p className="text-sm font-medium">{c.name}</p>
                         <p className="text-xs text-slate-400">{cItems.length} items</p>
@@ -3829,7 +2237,7 @@ export default function DashboardCMDB() {
                   const days = getDaysUntilExpiration(item.expiration_date)
                   const status = getItemStatus(item.expiration_date)
                   return (
-                    <button key={item.id} onClick={() => { setStatsModal(null); setModalSearch(''); navigateToItem(item) }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
+                    <button key={item.id} onClick={() => { closeStatsModal(); navigateToItem(item) }} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3 hover:border-slate-600 hover:bg-slate-700/50 transition-all text-left">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium truncate">{item.name}</p>
                         <p className="text-xs text-slate-400">{clientName} · {item.category}</p>

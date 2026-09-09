@@ -1,6 +1,6 @@
 # Memoria persistente del proyecto DS
 
-Actualizado: 2026-07-27
+Actualizado: 2026-09-09
 
 ## Propósito
 
@@ -15,15 +15,16 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 - Despliegue: build multi-stage con Node 20 y Nginx.
 - Entrada: `src/main.tsx` -> `src/App.tsx` -> `AuthProvider` -> `LoginPage` o `DashboardCMDB`.
 - Modelo principal: `cmdb_clients`, `cmdb_items`; el frontend también espera `cmdb_item_history` y `cmdb_user_roles`.
-- La lógica de datos y presentación está concentrada principalmente en `src/components/DashboardCMDB.tsx` (~1300 líneas). Existen hooks extraídos en `src/hooks/`, pero el dashboard todavía duplica esa lógica y no los utiliza.
+- La lógica de presentación está en `src/components/DashboardCMDB.tsx` (~2270 líneas; llegó a ~3860 antes de la limpieza de 2026-09-09). Los subcomponentes visuales viven en `src/components/dashboard/`, y `DashboardCMDB` consume `useCmdbData`, `useCmdbFilters` y `useCmdbModals` como única fuente de estado — ya no duplica esa lógica.
 
 ## Estado verificado
 
 - 2026-07-27: `DashboardCMDB` pasó a usar `useCmdbData` como capa única para carga, roles, historial y operaciones CRUD; se eliminó la implementación duplicada de esas responsabilidades.
+- 2026-09-09: extracción de componentes visuales + conexión a `useCmdbFilters`/`useCmdbModals` (ver hallazgo 5). Verificado manualmente por el usuario contra el servidor local (abre y muestra datos correctamente) además de `typecheck`/`lint`/`build`/`test`.
 - `npm run typecheck`: pasa sin errores.
 - `npm run lint`: pasa sin errores, con dos advertencias preexistentes en `FloatingLines.tsx` y `AuthContext.tsx`.
-- `npm run build`: pasa; Vite advierte que el bundle principal minificado supera 500 kB.
-- No se encontraron pruebas automatizadas, README ni archivo de ejemplo de variables de entorno.
+- `npm run build`: pasa sin advertencias de tamaño de chunk — el chunk de `LoginPage` bajó de ~574 kB a ~70 kB al cambiar el fondo de `three.js` a OGL (`Topography`), eliminando la advertencia de bundle >500 kB que existía antes.
+- `npm run test`: 2 archivos, 5 tests, todos pasan.
 - El worktree ya contenía modificaciones del usuario antes de este análisis; no deben sobrescribirse.
 
 ## Hallazgos prioritarios
@@ -42,9 +43,13 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
 
 4. **Alto — errores de base de datos ignorados.** Varias operaciones de lectura/escritura/borrado no inspeccionan `error`; la UI puede reportar éxito o cerrar modales aunque Supabase haya fallado. Centralizar manejo de errores, mostrar feedback y no refrescar/cerrar hasta confirmar éxito.
 
-5. **Medio — deuda estructural.** La duplicación de acceso a datos se eliminó al conectar `DashboardCMDB` con `useCmdbData`. Aún falta conectarlo con `useCmdbFilters` y `useCmdbModals`, y extraer sus componentes visuales grandes.
+5. **Medio — deuda estructural.** La duplicación de acceso a datos se eliminó al conectar `DashboardCMDB` con `useCmdbData`.
 
-6. **Medio — inconsistencias funcionales.** Las categorías mezclan español e inglés (`Servidores` frente a `Servers`), los filtros usan variantes `All`/`Todos`, y el comentario del timeout dice 15 minutos mientras el valor real es 5 minutos. Normalizar constantes y textos.
+   **Actualización 2026-09-09:** se extrajeron 11 componentes visuales de `DashboardCMDB.tsx` a `src/components/dashboard/` (ThemeToggle, StatusPill, SectionCard, los tres modales bulk, etc.) y se conectó el componente a `useCmdbFilters`/`useCmdbModals`, que estaban desactualizados respecto al comportamiento real (defaults `All`/`Todos`, faltaba la variante `alerts` del stats modal, `newItemDefaults`, `matchingClientResults`, restauración de navegación al recargar) y se actualizaron para igualar el comportamiento existente antes de conectarlos. `DashboardCMDB.tsx` bajó de ~3860 a ~2270 líneas. Sigue pendiente partir el cuerpo principal de `DashboardCMDB` (aún ~2270 líneas: estado de roles/auditoría/calidad de datos y todo el JSX) en piezas más pequeñas.
+
+6. **Medio — inconsistencias funcionales.** Las categorías mezclan español e inglés (`Servidores` frente a `Servers`), y el comentario del timeout dice 15 minutos mientras el valor real es 5 minutos. Normalizar constantes y textos.
+
+   **Actualización 2026-09-09:** la variante `All`/`Todos` en los filtros de categoría/estado se normalizó a `All` al actualizar `useCmdbFilters` (ver hallazgo 5).
 
 7. **Medio — fechas y estados.** El estado derivado por vencimiento usa `new Date('YYYY-MM-DD')` y la hora local, lo que puede producir desfases cerca de medianoche. A la vez se persiste un campo `status`, creando dos fuentes de verdad. Definir una sola regla, preferiblemente calculada en servidor o con fechas UTC normalizadas.
 
@@ -53,6 +58,8 @@ Aplicación web interna tipo CMDB para administrar clientes y sus activos/servic
    **Actualización 2026-08-01:** se añadió infraestructura para correos de expiración y calidad de datos. `20260801_add_expiration_email_alerts.sql` crea configuración, auditoría de entregas y problemas deduplicados. `send-expiration-alerts` valida licencias, resuelve incidencias corregidas, evita correos duplicados y envía resúmenes mediante Resend. El dashboard permite configurar alertas y consultar problemas. Falta aplicar la migración, desplegar la Edge Function, configurar `RESEND_API_KEY`/`CRON_SECRET` y crear el Cron diario.
 
 **Actualización 2026-08-02:** se añadió `20260802_add_admin_audit_logs.sql` con auditoría inmutable de sesiones, clientes, ítems, roles, configuración de alertas y accesos/guardados de credenciales. Sólo administradores pueden consultar los eventos; PostgreSQL elimina automáticamente registros mayores a 15 días mediante `pg_cron`. El dashboard incorpora búsqueda, filtros y detalle de valores anteriores/nuevos. `AuthContext` diferencia cierre manual y cierre por inactividad. Falta aplicar la migración remota antes de utilizar el panel.
+
+**Actualización de login 2026-09-09:** el fondo del login pasó de `FloatingLines` (three.js) a `Topography` (OGL, más liviano) en `src/components/Topography.tsx`; el logo (`src/assets/logo1.png`) se recoloreó a tono casi blanco conservando su transparencia y el degradado cyan original sobre la "o". Se agregó un checkbox "Stay signed in" que, cuando está marcado, omite el auto-logout de 15 minutos de inactividad (la preferencia se guarda en `localStorage` por email). Se quitó la integración de Vercel Speed Insights.
 
 **Actualización de tema:** el dashboard incluye modos oscuro (predeterminado) y claro. La selección se guarda en `localStorage` con una clave separada por ID de usuario y se aplica también a modales y formularios.
 

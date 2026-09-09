@@ -1,19 +1,24 @@
 import { useState, useCallback } from 'react'
 import { CmdbItem } from '../lib/supabase'
 
+type NewItemDefaults = { clientId: string; category: string } | null
+type StatsModalType = null | 'clients' | 'total' | 'expiring' | 'critical' | 'alerts'
+
 export function useCmdbModals() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editItem, setEditItem] = useState<CmdbItem | null>(null)
+  const [newItemDefaults, setNewItemDefaults] = useState<NewItemDefaults>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientName, setEditClientName] = useState('')
   const [savingClient, setSavingClient] = useState(false)
   const [historyItem, setHistoryItem] = useState<CmdbItem | null>(null)
-  const [statsModal, setStatsModal] = useState<null | 'clients' | 'total' | 'expiring' | 'critical'>(null)
+  const [statsModal, setStatsModal] = useState<StatsModalType>(null)
   const [modalSearch, setModalSearch] = useState('')
   const [rolesModal, setRolesModal] = useState(false)
 
   const openEditModal = useCallback((item?: CmdbItem | null) => {
+    setNewItemDefaults(null)
     setEditItem(item ?? null)
     setModalOpen(true)
   }, [])
@@ -21,10 +26,12 @@ export function useCmdbModals() {
   const closeEditModal = useCallback(() => {
     setModalOpen(false)
     setEditItem(null)
+    setNewItemDefaults(null)
   }, [])
 
-  const openNewItem = useCallback(() => {
+  const openNewItem = useCallback((defaults?: NewItemDefaults) => {
     setEditItem(null)
+    setNewItemDefaults(defaults ?? null)
     setModalOpen(true)
   }, [])
 
@@ -38,7 +45,7 @@ export function useCmdbModals() {
     setEditClientName('')
   }, [])
 
-  const openStatsModal = useCallback((type: typeof statsModal) => {
+  const openStatsModal = useCallback((type: StatsModalType) => {
     setStatsModal(type)
     setModalSearch('')
   }, [])
@@ -51,6 +58,7 @@ export function useCmdbModals() {
   return {
     modalOpen, setModalOpen,
     editItem, setEditItem,
+    newItemDefaults, setNewItemDefaults,
     deleteConfirm, setDeleteConfirm,
     editClientId, setEditClientId,
     editClientName, setEditClientName,
