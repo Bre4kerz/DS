@@ -39,6 +39,10 @@ html[data-theme='light'] .category-card {
   --category-active-rgb: var(--category-light-rgb);
 }
 
+html[data-theme='light'] .app-logo {
+  filter: brightness(0);
+}
+
 html[data-theme='light'] .category-icon {
   color: rgb(var(--category-active-rgb)) !important;
 }

@@ -901,7 +901,7 @@ export default function DashboardCMDB() {
       <header className="sticky top-0 z-30 w-full min-w-0 border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm">
         <div className="mx-auto flex w-full min-w-0 max-w-[1800px] flex-wrap items-center justify-between gap-2 px-4 py-4 md:px-6">
           <div className="flex items-center">
-            <img src={logoImg} alt="JoSYS" className="h-8 md:h-10 w-auto object-contain brightness-125" />
+            <img src={logoImg} alt="JoSYS" className="app-logo h-8 md:h-10 w-auto object-contain brightness-125" />
           </div>
           <div className={`${actionMenuMounted ? 'hidden' : 'hidden lg:flex'} absolute left-1/2 -translate-x-1/2 flex-col items-center`}>
             <span className="text-xl font-semibold text-slate-300 tracking-widest uppercase">Services Dashboard</span>
