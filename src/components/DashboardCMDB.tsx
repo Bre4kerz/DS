@@ -20,6 +20,7 @@ import SectionCard from './dashboard/SectionCard'
 import BulkCredentialReplaceModal from './dashboard/BulkCredentialReplaceModal'
 import BulkItemReplaceModal from './dashboard/BulkItemReplaceModal'
 import BulkDeleteItemsModal from './dashboard/BulkDeleteItemsModal'
+import HealthOverviewModal from './dashboard/HealthOverviewModal'
 import { getProcessTracking, isProcessStale } from './dashboard/processTracking'
 
 const DataTransferModal = lazy(() => import('./DataTransferModal'))
@@ -293,6 +294,7 @@ export default function DashboardCMDB() {
   const [expandedAuditLogId, setExpandedAuditLogId] = useState<number | null>(null)
   const [alertSettingsModal, setAlertSettingsModal] = useState(false)
   const [qualityIssuesModal, setQualityIssuesModal] = useState(false)
+  const [healthOverviewModal, setHealthOverviewModal] = useState(false)
   const [qualityIssues, setQualityIssues] = useState<QualityIssue[]>([])
   const [qualitySearch, setQualitySearch] = useState('')
   const [qualitySeverity, setQualitySeverity] = useState('all')
@@ -1088,6 +1090,15 @@ export default function DashboardCMDB() {
                   {visibleQualityIssues.length}
                 </p>
               </button>}
+              {(hasPermission('quality.view') || hasPermission('alerts.view') || userRole === 'superuser') && (
+                <button
+                  onClick={() => setHealthOverviewModal(true)}
+                  className="col-span-2 flex items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-4 text-left transition-all hover:border-cyan-600/50 hover:bg-slate-800"
+                >
+                  <span className="text-xs text-slate-400">Health overview</span>
+                  <span className="text-[11px] text-cyan-400">View summary →</span>
+                </button>
+              )}
 
             </div>
 
@@ -1776,6 +1787,16 @@ export default function DashboardCMDB() {
       )}
 
       {/* Data Quality Modal */}
+      {healthOverviewModal && (
+        <HealthOverviewModal
+          allItems={allItems}
+          clients={clients}
+          qualityIssues={visibleQualityIssues}
+          onClose={() => setHealthOverviewModal(false)}
+          onSelectClient={setSelectedClientId}
+        />
+      )}
+
       {qualityIssuesModal && (
         <div className="modal-backdrop fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setQualityIssuesModal(false)}>
           <div className="modal-surface bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={event => event.stopPropagation()}>
